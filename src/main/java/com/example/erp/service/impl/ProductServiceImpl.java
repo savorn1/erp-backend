@@ -192,6 +192,7 @@ public class ProductServiceImpl implements ProductService {
                 .trackingType(request.getTrackingType())
                 .imageUrl(request.getImageUrl())
                 .reorderPoint(request.getReorderPoint())
+                .maxStock(request.getMaxStock())
                 .build();
         productRepository.save(product);
         return getProduct(product.getId());
@@ -229,6 +230,7 @@ public class ProductServiceImpl implements ProductService {
         product.setTrackingType(request.getTrackingType());
         product.setImageUrl(request.getImageUrl());
         product.setReorderPoint(request.getReorderPoint());
+        product.setMaxStock(request.getMaxStock());
         productRepository.save(product);
         if (!Objects.equals(oldUnitOfMeasureId, request.getUnitOfMeasureId())) {
             reconcileBaseUnitChange(product.getId(), request.getUnitOfMeasureId());
@@ -351,6 +353,7 @@ public class ProductServiceImpl implements ProductService {
                 .trackingType((product.getTrackingType() == null ? ProductTrackingType.NONE : product.getTrackingType()).name())
                 .imageUrl(product.getImageUrl())
                 .reorderPoint(product.getReorderPoint() == null ? BigDecimal.ZERO : product.getReorderPoint())
+                .maxStock(product.getMaxStock() == null ? BigDecimal.ZERO : product.getMaxStock())
                 .build();
     }
 }

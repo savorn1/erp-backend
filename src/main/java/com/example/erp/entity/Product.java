@@ -95,4 +95,11 @@ public class Product {
     // read as zero.
     @Column(name = "reorder_point", precision = 19, scale = 4)
     private BigDecimal reorderPoint;
+
+    // Threshold for the Overstock report (see InventoryReportServiceImpl) —
+    // a product is never flagged when this is null or zero, meaning "no
+    // threshold configured". Same nullable-for-ddl-auto=update reasoning as
+    // reorderPoint above; treat a null read as zero.
+    @Column(name = "max_stock", precision = 19, scale = 4)
+    private BigDecimal maxStock;
 }

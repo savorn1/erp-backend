@@ -167,6 +167,7 @@ public class InventoryOverviewServiceImpl implements InventoryOverviewService {
                     .unitCost(unitCost)
                     .valuationValue(current.multiply(unitCost))
                     .reorderPoint(product.getReorderPoint() == null ? BigDecimal.ZERO : product.getReorderPoint())
+                    .maxStock(product.getMaxStock() == null ? BigDecimal.ZERO : product.getMaxStock())
                     .build());
         }
 

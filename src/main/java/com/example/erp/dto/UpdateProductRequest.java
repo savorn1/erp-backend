@@ -56,4 +56,9 @@ public class UpdateProductRequest {
     // Stock report.
     @DecimalMin(value = "0", message = "Reorder point cannot be negative")
     private BigDecimal reorderPoint;
+
+    // Optional — leave unset (or zero) to never flag this product on the
+    // Overstock report.
+    @DecimalMin(value = "0", message = "Max stock cannot be negative")
+    private BigDecimal maxStock;
 }

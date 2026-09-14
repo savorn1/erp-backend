@@ -39,4 +39,7 @@ public class InventoryOverviewResponse {
     // Product.reorderPoint — null/zero means no threshold configured, so
     // this row is never flagged by the Low Stock report.
     private BigDecimal reorderPoint;
+    // Product.maxStock — null/zero means no threshold configured, so this
+    // row is never flagged by the Overstock report.
+    private BigDecimal maxStock;
 }

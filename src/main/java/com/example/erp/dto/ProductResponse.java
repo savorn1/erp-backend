@@ -47,4 +47,7 @@ public class ProductResponse {
     // Null/zero means no threshold configured — never flagged by the Low
     // Stock report.
     private BigDecimal reorderPoint;
+    // Null/zero means no threshold configured — never flagged by the
+    // Overstock report.
+    private BigDecimal maxStock;
 }
