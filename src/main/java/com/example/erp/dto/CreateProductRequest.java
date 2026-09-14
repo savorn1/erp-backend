@@ -1,0 +1,57 @@
+package com.example.erp.dto;
+
+import com.example.erp.entity.ProductTrackingType;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+
+import java.math.BigDecimal;
+
+@Data
+public class CreateProductRequest {
+
+    @NotNull
+    private Long companyId;
+
+    private Long categoryId;
+    private Long brandId;
+    private Long typeId;
+
+    @NotNull
+    private Long unitOfMeasureId;
+
+    private Long supplierId;
+
+    @NotBlank
+    private String name;
+
+    private String description;
+
+    @NotBlank
+    private String sku;
+
+    private String barcode;
+
+    @NotNull
+    @DecimalMin(value = "0", message = "Cost price cannot be negative")
+    private BigDecimal costPrice;
+
+    @NotNull
+    @DecimalMin(value = "0", message = "Selling price cannot be negative")
+    private BigDecimal sellingPrice;
+
+    @DecimalMin(value = "0", message = "Tax rate cannot be negative")
+    @DecimalMax(value = "100", message = "Tax rate cannot exceed 100%")
+    private BigDecimal taxRate = BigDecimal.ZERO;
+
+    private ProductTrackingType trackingType = ProductTrackingType.NONE;
+
+    private String imageUrl;
+
+    // Optional — leave unset (or zero) to never flag this product on the Low
+    // Stock report.
+    @DecimalMin(value = "0", message = "Reorder point cannot be negative")
+    private BigDecimal reorderPoint;
+}

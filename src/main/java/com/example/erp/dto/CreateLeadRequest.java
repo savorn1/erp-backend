@@ -1,0 +1,37 @@
+package com.example.erp.dto;
+
+import com.example.erp.entity.LeadSource;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+
+import java.math.BigDecimal;
+
+@Data
+public class CreateLeadRequest {
+
+    @NotNull
+    private Long companyId;
+
+    @NotBlank
+    private String contactName;
+
+    private String organizationName;
+
+    @Email
+    private String email;
+
+    private String phone;
+
+    @NotNull
+    private LeadSource source;
+
+    private Long assignedToUserId;
+
+    @DecimalMin(value = "0", message = "Estimated value cannot be negative")
+    private BigDecimal estimatedValue;
+
+    private String notes;
+}
