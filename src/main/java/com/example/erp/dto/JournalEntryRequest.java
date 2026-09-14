@@ -21,6 +21,9 @@ public class JournalEntryRequest {
 
     private String description;
 
+    // Optional — see Journal.
+    private Long journalId;
+
     // Must balance (sum of debits == sum of credits) and have at least two
     // lines — enforced in JournalEntryServiceImpl, not by annotations here.
     @Size(min = 2, message = "A journal entry needs at least two lines")

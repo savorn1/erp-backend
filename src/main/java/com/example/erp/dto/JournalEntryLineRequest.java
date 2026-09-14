@@ -21,4 +21,7 @@ public class JournalEntryLineRequest {
     private BigDecimal credit = BigDecimal.ZERO;
 
     private String description;
+
+    // Optional — see CostCenter.
+    private Long costCenterId;
 }

@@ -37,6 +37,7 @@ import com.example.erp.repository.PurchaseOrderRepository;
 import com.example.erp.entity.SupplierPaymentAllocation;
 import com.example.erp.repository.SupplierPaymentAllocationRepository;
 import com.example.erp.repository.SupplierRepository;
+import com.example.erp.service.AutoPostingService;
 import com.example.erp.service.PurchaseInvoiceService;
 import com.example.erp.service.SupplierService;
 import com.example.erp.util.PageableUtils;
@@ -76,6 +77,7 @@ public class PurchaseInvoiceServiceImpl implements PurchaseInvoiceService {
     private final ProductRepository productRepository;
     private final PurchaseCreditNoteRepository purchaseCreditNoteRepository;
     private final SupplierPaymentAllocationRepository supplierPaymentAllocationRepository;
+    private final AutoPostingService autoPostingService;
 
     @Override
     @Transactional(readOnly = true)
@@ -223,7 +225,10 @@ public class PurchaseInvoiceServiceImpl implements PurchaseInvoiceService {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft purchase invoices can be approved");
         }
         List<PurchaseInvoiceLine> lines = purchaseInvoiceLineRepository.findByPurchaseInvoiceId(id);
-        BigDecimal totalAmount = computeTotals(lines)[3];
+        BigDecimal[] totals = computeTotals(lines);
+        BigDecimal netAmount = totals[0].subtract(totals[1]);
+        BigDecimal taxAmount = totals[2];
+        BigDecimal totalAmount = totals[3];
 
         invoice.setStatus(PurchaseInvoiceStatus.APPROVED);
         purchaseInvoiceRepository.save(invoice);
@@ -233,6 +238,8 @@ public class PurchaseInvoiceServiceImpl implements PurchaseInvoiceService {
         chargeRequest.setAmount(totalAmount);
         chargeRequest.setNote("Purchase invoice " + invoice.getInvoiceNumber());
         supplierService.adjustBalance(invoice.getSupplierId(), chargeRequest, actingUsername);
+
+        autoPostingService.postPurchaseInvoiceApproval(invoice, netAmount, taxAmount, totalAmount, actingUsername);
 
         return toResponse(invoice, lines);
     }
@@ -253,6 +260,7 @@ public class PurchaseInvoiceServiceImpl implements PurchaseInvoiceService {
             reverseRequest.setAmount(totalAmount);
             reverseRequest.setNote("Reversal of cancelled purchase invoice " + invoice.getInvoiceNumber());
             supplierService.adjustBalance(invoice.getSupplierId(), reverseRequest, actingUsername);
+            autoPostingService.reverseAutoEntry("PURCHASE_INVOICE", invoice.getId(), actingUsername);
         }
 
         invoice.setStatus(PurchaseInvoiceStatus.CANCELLED);

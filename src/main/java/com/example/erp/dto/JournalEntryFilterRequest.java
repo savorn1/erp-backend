@@ -14,6 +14,9 @@ public class JournalEntryFilterRequest {
     // Entries with at least one line against this account — a simple form of
     // "journal audit" for a given account.
     private Long accountId;
+    private Long journalId;
+    // e.g. "INVOICE" — matches only auto-generated entries from that source.
+    private String sourceType;
 
     private String sortBy = "id";
     private String sortOrder = "desc";

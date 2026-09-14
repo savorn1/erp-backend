@@ -21,4 +21,6 @@ public class TaxRateResponse {
     private String type;
     private BigDecimal ratePercent;
     private boolean active;
+    private Long accountId;
+    private String accountLabel;
 }

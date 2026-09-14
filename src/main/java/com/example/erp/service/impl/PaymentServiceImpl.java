@@ -26,6 +26,7 @@ import com.example.erp.repository.InvoiceLineRepository;
 import com.example.erp.repository.InvoiceRepository;
 import com.example.erp.repository.PaymentAllocationRepository;
 import com.example.erp.repository.PaymentRepository;
+import com.example.erp.service.AutoPostingService;
 import com.example.erp.service.CustomerService;
 import com.example.erp.service.PaymentService;
 import com.example.erp.util.PageableUtils;
@@ -59,6 +60,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final InvoiceRepository invoiceRepository;
     private final InvoiceLineRepository invoiceLineRepository;
     private final CreditNoteRepository creditNoteRepository;
+    private final AutoPostingService autoPostingService;
 
     @Override
     @Transactional(readOnly = true)
@@ -146,6 +148,7 @@ public class PaymentServiceImpl implements PaymentService {
         adjustment.setAmount(total);
         adjustment.setNote("Payment " + payment.getPaymentNumber());
         customerService.adjustBalance(request.getCustomerId(), adjustment, actingUsername);
+        autoPostingService.postCustomerPayment(payment, actingUsername);
 
         return toResponse(payment);
     }
@@ -202,6 +205,7 @@ public class PaymentServiceImpl implements PaymentService {
         adjustment.setAmount(request.getAmount());
         adjustment.setNote("Refund " + refund.getPaymentNumber() + " of payment " + original.getPaymentNumber());
         customerService.adjustBalance(original.getCustomerId(), adjustment, actingUsername);
+        autoPostingService.postCustomerPayment(refund, actingUsername);
 
         return toResponse(refund);
     }

@@ -16,6 +16,7 @@ import com.example.erp.repository.PurchaseCreditNoteRepository;
 import com.example.erp.repository.PurchaseInvoiceLineRepository;
 import com.example.erp.repository.PurchaseInvoiceRepository;
 import com.example.erp.repository.SupplierRepository;
+import com.example.erp.service.AutoPostingService;
 import com.example.erp.service.PurchaseCreditNoteService;
 import com.example.erp.service.SupplierService;
 import com.example.erp.util.PageableUtils;
@@ -43,6 +44,7 @@ public class PurchaseCreditNoteServiceImpl implements PurchaseCreditNoteService 
     private final PurchaseInvoiceLineRepository purchaseInvoiceLineRepository;
     private final SupplierRepository supplierRepository;
     private final SupplierService supplierService;
+    private final AutoPostingService autoPostingService;
 
     @Override
     @Transactional(readOnly = true)
@@ -111,6 +113,7 @@ public class PurchaseCreditNoteServiceImpl implements PurchaseCreditNoteService 
         paymentRequest.setAmount(request.getAmount());
         paymentRequest.setNote("Purchase credit note " + creditNote.getCreditNoteNumber() + " for invoice " + invoice.getInvoiceNumber());
         supplierService.adjustBalance(invoice.getSupplierId(), paymentRequest, actingUsername);
+        autoPostingService.postPurchaseCreditNote(creditNote, actingUsername);
 
         return toResponse(creditNote);
     }

@@ -52,6 +52,6 @@ public class AccountController {
     @PostMapping("/seed-sample/{companyId}")
     public ResponseEntity<ApiResponse<List<AccountResponse>>> seedSample(@PathVariable Long companyId) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Sample chart of accounts created", accountService.seedSampleChartOfAccounts(companyId)));
+                .body(ApiResponse.success("Standard chart of accounts seeded", accountService.seedSampleChartOfAccounts(companyId)));
     }
 }

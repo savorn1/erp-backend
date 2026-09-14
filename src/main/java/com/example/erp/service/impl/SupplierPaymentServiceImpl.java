@@ -26,6 +26,7 @@ import com.example.erp.repository.PurchaseInvoiceRepository;
 import com.example.erp.repository.SupplierPaymentAllocationRepository;
 import com.example.erp.repository.SupplierPaymentRepository;
 import com.example.erp.repository.SupplierRepository;
+import com.example.erp.service.AutoPostingService;
 import com.example.erp.service.SupplierPaymentService;
 import com.example.erp.service.SupplierService;
 import com.example.erp.util.PageableUtils;
@@ -59,6 +60,7 @@ public class SupplierPaymentServiceImpl implements SupplierPaymentService {
     private final PurchaseInvoiceRepository purchaseInvoiceRepository;
     private final PurchaseInvoiceLineRepository purchaseInvoiceLineRepository;
     private final PurchaseCreditNoteRepository purchaseCreditNoteRepository;
+    private final AutoPostingService autoPostingService;
 
     @Override
     @Transactional(readOnly = true)
@@ -147,6 +149,7 @@ public class SupplierPaymentServiceImpl implements SupplierPaymentService {
         adjustment.setAmount(total);
         adjustment.setNote("Payment " + payment.getPaymentNumber());
         supplierService.adjustBalance(request.getSupplierId(), adjustment, actingUsername);
+        autoPostingService.postSupplierPayment(payment, actingUsername);
 
         return toResponse(payment);
     }
@@ -203,6 +206,7 @@ public class SupplierPaymentServiceImpl implements SupplierPaymentService {
         adjustment.setAmount(request.getAmount());
         adjustment.setNote("Refund " + refund.getPaymentNumber() + " of payment " + original.getPaymentNumber());
         supplierService.adjustBalance(original.getSupplierId(), adjustment, actingUsername);
+        autoPostingService.postSupplierPayment(refund, actingUsername);
 
         return toResponse(refund);
     }

@@ -29,4 +29,7 @@ public class TaxRateRequest {
     private BigDecimal ratePercent;
 
     private boolean active = true;
+
+    // Optional — see TaxRate.accountId.
+    private Long accountId;
 }

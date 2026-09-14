@@ -13,5 +13,7 @@ public interface JournalEntryLineRepository extends JpaRepository<JournalEntryLi
 
     List<JournalEntryLine> findByAccountId(Long accountId);
 
+    boolean existsByCostCenterId(Long costCenterId);
+
     void deleteByJournalEntryId(Long journalEntryId);
 }

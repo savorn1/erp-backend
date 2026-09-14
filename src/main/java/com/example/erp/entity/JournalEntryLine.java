@@ -46,4 +46,8 @@ public class JournalEntryLine {
     private BigDecimal credit = BigDecimal.ZERO;
 
     private String description;
+
+    // Optional — see CostCenter.
+    @Column(name = "cost_center_id")
+    private Long costCenterId;
 }

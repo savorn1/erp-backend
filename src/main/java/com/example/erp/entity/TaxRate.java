@@ -16,11 +16,16 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 
-// A named tax rate a company uses — reference data only for now. Sales/
-// purchase order and invoice lines still carry their own free-typed taxRate
-// percent (see SalesOrderLine/PurchaseOrderLine/InvoiceLine); this isn't
-// wired into them, so pick a rate value here that matches what's typed on
-// those lines if you want TaxReportServiceImpl's grouping to line up with it.
+// A named tax rate a company uses. Sales/purchase order and invoice lines
+// still carry their own free-typed taxRate percent (see
+// SalesOrderLine/PurchaseOrderLine/InvoiceLine) rather than a link to a row
+// here, so pick a rate value here that matches what's typed on those lines
+// if you want TaxReportServiceImpl's grouping to line up with it. accountId
+// (the "Tax Account" for this rate) is likewise unreachable from an
+// invoice/order line for the same reason — AutoPostingServiceImpl can only
+// use it when it's asked to post a specific TaxRate directly (there is no
+// such call site yet); everyday Invoice/PurchaseInvoice auto-posting falls
+// back to PostingRule's own taxPayableAccountId/taxReceivableAccountId.
 @Entity
 @Table(name = "tax_rates")
 @Getter
@@ -53,4 +58,9 @@ public class TaxRate {
 
     @Builder.Default
     private boolean active = true;
+
+    // The GL account this tax posts to when it can be posted directly —
+    // see the class comment above for why that's rare today.
+    @Column(name = "account_id")
+    private Long accountId;
 }

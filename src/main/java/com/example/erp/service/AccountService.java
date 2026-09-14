@@ -20,9 +20,10 @@ public interface AccountService {
     // Refuses when the account has children — reassign or delete them first.
     void delete(Long id);
 
-    // Idempotent — creates the standard demo tree (1000 Assets > Cash/Bank/
-    // Inventory, 2000 Liabilities > Accounts Payable, 4000 Revenue > Sales
-    // Revenue, 5000 Expenses > Salary/Rent) for the given company, skipping
-    // any account code that already exists there.
+    // Idempotent — creates the standard three-level chart (1000 Assets >
+    // 1100 Current Assets / 1200 Fixed Assets > leaf accounts, 2000
+    // Liabilities, 3000 Equity, 4000 Revenue, 5000 Expenses) for the given
+    // company. Any account code that already exists there is left exactly
+    // as-is and only the missing ones are added beneath it.
     List<AccountResponse> seedSampleChartOfAccounts(Long companyId);
 }

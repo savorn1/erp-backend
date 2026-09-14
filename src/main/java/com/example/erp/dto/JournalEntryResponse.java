@@ -33,5 +33,11 @@ public class JournalEntryResponse {
     private LocalDateTime createdAt;
     private String postedBy;
     private LocalDateTime postedAt;
+    private Long journalId;
+    private String journalCode;
+    private String journalName;
+    // Set only on auto-generated entries — e.g. "INVOICE" — see JournalEntry.
+    private String sourceType;
+    private Long sourceId;
     private List<JournalEntryLineResponse> lines;
 }

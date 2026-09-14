@@ -20,4 +20,6 @@ public class JournalEntryLineResponse {
     private BigDecimal debit;
     private BigDecimal credit;
     private String description;
+    private Long costCenterId;
+    private String costCenterName;
 }

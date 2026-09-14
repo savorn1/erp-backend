@@ -4,9 +4,11 @@ import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.TaxRateFilterRequest;
 import com.example.erp.dto.TaxRateRequest;
 import com.example.erp.dto.TaxRateResponse;
+import com.example.erp.entity.Account;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.TaxRate;
 import com.example.erp.exception.AppException;
+import com.example.erp.repository.AccountRepository;
 import com.example.erp.repository.CompanyRepository;
 import com.example.erp.repository.TaxRateRepository;
 import com.example.erp.service.TaxRateService;
@@ -28,6 +30,7 @@ public class TaxRateServiceImpl implements TaxRateService {
 
     private final TaxRateRepository taxRateRepository;
     private final CompanyRepository companyRepository;
+    private final AccountRepository accountRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -65,6 +68,7 @@ public class TaxRateServiceImpl implements TaxRateService {
         if (taxRateRepository.existsByCompanyIdAndCode(request.getCompanyId(), request.getCode())) {
             throw new AppException(HttpStatus.CONFLICT, "Tax rate code already taken in this company: " + request.getCode());
         }
+        requireAccount(request.getAccountId(), request.getCompanyId());
         TaxRate taxRate = TaxRate.builder()
                 .companyId(request.getCompanyId())
                 .code(request.getCode())
@@ -72,6 +76,7 @@ public class TaxRateServiceImpl implements TaxRateService {
                 .type(request.getType())
                 .ratePercent(request.getRatePercent())
                 .active(request.isActive())
+                .accountId(request.getAccountId())
                 .build();
         taxRateRepository.save(taxRate);
         return toResponse(taxRate);
@@ -85,12 +90,14 @@ public class TaxRateServiceImpl implements TaxRateService {
         if (taxRateRepository.existsByCompanyIdAndCodeAndIdNot(request.getCompanyId(), request.getCode(), id)) {
             throw new AppException(HttpStatus.CONFLICT, "Tax rate code already taken in this company: " + request.getCode());
         }
+        requireAccount(request.getAccountId(), request.getCompanyId());
         taxRate.setCompanyId(request.getCompanyId());
         taxRate.setCode(request.getCode());
         taxRate.setName(request.getName());
         taxRate.setType(request.getType());
         taxRate.setRatePercent(request.getRatePercent());
         taxRate.setActive(request.isActive());
+        taxRate.setAccountId(request.getAccountId());
         taxRateRepository.save(taxRate);
         return toResponse(taxRate);
     }
@@ -106,6 +113,15 @@ public class TaxRateServiceImpl implements TaxRateService {
                 .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Company not found with id: " + companyId));
     }
 
+    private void requireAccount(Long accountId, Long companyId) {
+        if (accountId == null) return;
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Account not found with id: " + accountId));
+        if (!account.getCompanyId().equals(companyId)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Account " + account.getAccountCode() + " does not belong to the selected company");
+        }
+    }
+
     private TaxRate find(Long id) {
         return taxRateRepository.findById(id)
                 .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Tax rate not found with id: " + id));
@@ -113,6 +129,7 @@ public class TaxRateServiceImpl implements TaxRateService {
 
     private TaxRateResponse toResponse(TaxRate taxRate) {
         String companyName = companyRepository.findById(taxRate.getCompanyId()).map(Company::getName).orElse(null);
+        Account account = taxRate.getAccountId() == null ? null : accountRepository.findById(taxRate.getAccountId()).orElse(null);
         return TaxRateResponse.builder()
                 .id(taxRate.getId())
                 .companyId(taxRate.getCompanyId())
@@ -122,6 +139,8 @@ public class TaxRateServiceImpl implements TaxRateService {
                 .type(taxRate.getType().name())
                 .ratePercent(taxRate.getRatePercent())
                 .active(taxRate.isActive())
+                .accountId(taxRate.getAccountId())
+                .accountLabel(account == null ? null : account.getAccountCode() + " — " + account.getName())
                 .build();
     }
 }

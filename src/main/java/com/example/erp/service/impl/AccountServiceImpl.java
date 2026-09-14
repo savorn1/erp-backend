@@ -154,42 +154,51 @@ public class AccountServiceImpl implements AccountService {
     public List<AccountResponse> seedSampleChartOfAccounts(Long companyId) {
         requireCompany(companyId);
 
-        record SeedChild(String code, String name) {}
-        record SeedGroup(String code, String name, AccountType type, List<SeedChild> children) {}
-        List<SeedGroup> groups = List.of(
-                new SeedGroup("1000", "Assets", AccountType.ASSET, List.of(
-                        new SeedChild("1100", "Cash"),
-                        new SeedChild("1200", "Bank"),
-                        new SeedChild("1300", "Inventory"))),
-                new SeedGroup("2000", "Liabilities", AccountType.LIABILITY, List.of(
-                        new SeedChild("2100", "Accounts Payable"))),
-                new SeedGroup("4000", "Revenue", AccountType.REVENUE, List.of(
-                        new SeedChild("4100", "Sales Revenue"))),
-                new SeedGroup("5000", "Expenses", AccountType.EXPENSE, List.of(
-                        new SeedChild("5100", "Salary"),
-                        new SeedChild("5200", "Rent")))
+        record Root(AccountType type, SeedNode node) {}
+        List<Root> roots = List.of(
+                new Root(AccountType.ASSET, SeedNode.of("1000", "Assets",
+                        SeedNode.of("1100", "Current Assets",
+                                SeedNode.of("1110", "Cash"),
+                                SeedNode.of("1120", "Bank"),
+                                SeedNode.of("1130", "Accounts Receivable"),
+                                SeedNode.of("1140", "Inventory"),
+                                SeedNode.of("1150", "Prepaid Expenses")),
+                        SeedNode.of("1200", "Fixed Assets",
+                                SeedNode.of("1210", "Land"),
+                                SeedNode.of("1220", "Buildings"),
+                                SeedNode.of("1230", "Vehicles"),
+                                SeedNode.of("1240", "Equipment"),
+                                SeedNode.of("1250", "Accumulated Depreciation")))),
+                new Root(AccountType.LIABILITY, SeedNode.of("2000", "Liabilities",
+                        SeedNode.of("2100", "Accounts Payable"),
+                        SeedNode.of("2200", "Tax Payable"),
+                        SeedNode.of("2300", "Other Payables"))),
+                new Root(AccountType.EQUITY, SeedNode.of("3000", "Equity",
+                        SeedNode.of("3100", "Share Capital"),
+                        SeedNode.of("3200", "Retained Earnings"),
+                        SeedNode.of("3300", "Current Year Profit"))),
+                new Root(AccountType.REVENUE, SeedNode.of("4000", "Revenue",
+                        SeedNode.of("4100", "Product Sales"),
+                        SeedNode.of("4200", "Service Revenue"),
+                        SeedNode.of("4300", "Other Revenue"),
+                        SeedNode.of("4900", "Sales Returns"))),
+                new Root(AccountType.EXPENSE, SeedNode.of("5000", "Expenses",
+                        SeedNode.of("5100", "Cost of Goods Sold"),
+                        SeedNode.of("5200", "Salaries"),
+                        SeedNode.of("5300", "Rent"),
+                        SeedNode.of("5400", "Utilities"),
+                        SeedNode.of("5500", "Depreciation"),
+                        SeedNode.of("5600", "Transportation"),
+                        SeedNode.of("5700", "Office Expenses")))
         );
 
-        for (SeedGroup group : groups) {
-            Account groupAccount = accountRepository.findByCompanyId(companyId).stream()
-                    .filter(a -> a.getAccountCode().equals(group.code()))
-                    .findFirst()
-                    .orElseGet(() -> accountRepository.save(Account.builder()
-                            .companyId(companyId)
-                            .accountCode(group.code())
-                            .name(group.name())
-                            .accountType(group.type())
-                            .build()));
-            for (SeedChild child : group.children()) {
-                if (accountRepository.existsByCompanyIdAndAccountCode(companyId, child.code())) continue;
-                accountRepository.save(Account.builder()
-                        .companyId(companyId)
-                        .accountCode(child.code())
-                        .name(child.name())
-                        .accountType(group.type())
-                        .parentAccountId(groupAccount.getId())
-                        .build());
-            }
+        // Existing codes are kept exactly as they are (name, parent, type) —
+        // an account may already carry journal lines, so a re-seed never
+        // rewrites one, it only fills in whatever is missing beneath it.
+        Map<String, Account> existingByCode = accountRepository.findByCompanyId(companyId).stream()
+                .collect(Collectors.toMap(Account::getAccountCode, a -> a, (a, b) -> a));
+        for (Root root : roots) {
+            seedNode(companyId, root.type(), root.node(), null, existingByCode);
         }
 
         List<Account> companyAccounts = accountRepository.findByCompanyId(companyId);
@@ -202,6 +211,32 @@ public class AccountServiceImpl implements AccountService {
                 .sorted((a, b) -> a.getAccountCode().compareTo(b.getAccountCode()))
                 .map(a -> toResponse(a, companyName, accountsById, childCountByParentId))
                 .toList();
+    }
+
+    private record SeedNode(String code, String name, List<SeedNode> children) {
+        static SeedNode of(String code, String name, SeedNode... children) {
+            return new SeedNode(code, name, List.of(children));
+        }
+    }
+
+    // Creates the node if its code is missing for the company, then recurses
+    // into its children with this node as their parent. A pre-existing
+    // account with the same code is reused as the parent untouched.
+    private void seedNode(Long companyId, AccountType type, SeedNode node, Long parentId, Map<String, Account> existingByCode) {
+        Account account = existingByCode.get(node.code());
+        if (account == null) {
+            account = accountRepository.save(Account.builder()
+                    .companyId(companyId)
+                    .accountCode(node.code())
+                    .name(node.name())
+                    .accountType(type)
+                    .parentAccountId(parentId)
+                    .build());
+            existingByCode.put(node.code(), account);
+        }
+        for (SeedNode child : node.children()) {
+            seedNode(companyId, type, child, account.getId(), existingByCode);
+        }
     }
 
     // Walks up from `parent` through its own ancestry — if `accountId` shows

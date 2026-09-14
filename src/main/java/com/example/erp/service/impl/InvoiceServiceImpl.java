@@ -36,6 +36,7 @@ import com.example.erp.repository.PaymentAllocationRepository;
 import com.example.erp.repository.ProductRepository;
 import com.example.erp.repository.SalesOrderLineRepository;
 import com.example.erp.repository.SalesOrderRepository;
+import com.example.erp.service.AutoPostingService;
 import com.example.erp.service.CustomerService;
 import com.example.erp.service.InvoiceService;
 import com.example.erp.util.PageableUtils;
@@ -74,6 +75,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     private final ProductRepository productRepository;
     private final CreditNoteRepository creditNoteRepository;
     private final PaymentAllocationRepository paymentAllocationRepository;
+    private final AutoPostingService autoPostingService;
 
     @Override
     @Transactional(readOnly = true)
@@ -224,7 +226,10 @@ public class InvoiceServiceImpl implements InvoiceService {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft invoices can be approved");
         }
         List<InvoiceLine> lines = invoiceLineRepository.findByInvoiceId(id);
-        BigDecimal totalAmount = computeTotals(lines)[3];
+        BigDecimal[] totals = computeTotals(lines);
+        BigDecimal netAmount = totals[0].subtract(totals[1]);
+        BigDecimal taxAmount = totals[2];
+        BigDecimal totalAmount = totals[3];
 
         invoice.setStatus(InvoiceStatus.APPROVED);
         invoiceRepository.save(invoice);
@@ -234,6 +239,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         chargeRequest.setAmount(totalAmount);
         chargeRequest.setNote("Invoice " + invoice.getInvoiceNumber());
         customerService.adjustBalance(invoice.getCustomerId(), chargeRequest, actingUsername);
+
+        autoPostingService.postInvoiceApproval(invoice, netAmount, taxAmount, totalAmount, actingUsername);
 
         return toResponse(invoice, lines);
     }
@@ -254,6 +261,7 @@ public class InvoiceServiceImpl implements InvoiceService {
             reverseRequest.setAmount(totalAmount);
             reverseRequest.setNote("Reversal of cancelled invoice " + invoice.getInvoiceNumber());
             customerService.adjustBalance(invoice.getCustomerId(), reverseRequest, actingUsername);
+            autoPostingService.reverseAutoEntry("INVOICE", invoice.getId(), actingUsername);
         }
 
         invoice.setStatus(InvoiceStatus.CANCELLED);

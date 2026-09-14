@@ -16,6 +16,7 @@ import com.example.erp.repository.CreditNoteRepository;
 import com.example.erp.repository.CustomerRepository;
 import com.example.erp.repository.InvoiceLineRepository;
 import com.example.erp.repository.InvoiceRepository;
+import com.example.erp.service.AutoPostingService;
 import com.example.erp.service.CreditNoteService;
 import com.example.erp.service.CustomerService;
 import com.example.erp.util.PageableUtils;
@@ -43,6 +44,7 @@ public class CreditNoteServiceImpl implements CreditNoteService {
     private final InvoiceLineRepository invoiceLineRepository;
     private final CustomerRepository customerRepository;
     private final CustomerService customerService;
+    private final AutoPostingService autoPostingService;
 
     @Override
     @Transactional(readOnly = true)
@@ -111,6 +113,7 @@ public class CreditNoteServiceImpl implements CreditNoteService {
         paymentRequest.setAmount(request.getAmount());
         paymentRequest.setNote("Credit note " + creditNote.getCreditNoteNumber() + " for invoice " + invoice.getInvoiceNumber());
         customerService.adjustBalance(invoice.getCustomerId(), paymentRequest, actingUsername);
+        autoPostingService.postCreditNote(creditNote, actingUsername);
 
         return toResponse(creditNote);
     }
