@@ -58,6 +58,22 @@ public interface AutoPostingService {
     // assetDisposalGainLossAccountId on whichever side balances the entry.
     void postAssetDisposal(FixedAsset asset, BigDecimal proceeds, String actingUsername);
 
+    // Dr Cash (cashAmount, only if > 0) + Dr Bank (bankAmount, only if > 0)
+    // / Cr Sales Revenue (netAmount) + Cr Tax Payable (taxAmount, only if >
+    // 0); plus, only if cogsAmount > 0: Dr Cost of Goods Sold (reusing
+    // purchaseExpenseAccountId) / Cr Inventory (inventoryAssetAccountId).
+    // No Accounts Receivable leg — a POS sale is always paid in full at
+    // checkout, unlike an Invoice.
+    void postPosSale(Long companyId, LocalDate date, BigDecimal cashAmount, BigDecimal bankAmount,
+                      BigDecimal netAmount, BigDecimal taxAmount, BigDecimal cogsAmount,
+                      Long sourceId, String actingUsername);
+
+    // Adjusts the cash account to match what was physically counted at
+    // session close. variance = countedCash - expectedCash: positive (over)
+    // -> Dr Cash / Cr cashVarianceAccountId; negative (short) -> Dr
+    // cashVarianceAccountId / Cr Cash. A zero variance posts nothing.
+    void postCashVariance(Long companyId, LocalDate date, BigDecimal variance, Long sourceId, String actingUsername);
+
     // Finds the auto-posted entry (if any) for this source and reverses it —
     // a POSTED entry gets a swapped-lines reversal (same as
     // JournalEntryServiceImpl.reverse), a DRAFT one (created while its

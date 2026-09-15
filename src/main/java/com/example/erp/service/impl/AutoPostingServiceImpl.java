@@ -188,6 +188,55 @@ public class AutoPostingServiceImpl implements AutoPostingService {
                 "FIXED_ASSET_DISPOSAL", asset.getId(), actingUsername, lines);
     }
 
+    @Override
+    @Transactional
+    public void postPosSale(Long companyId, LocalDate date, BigDecimal cashAmount, BigDecimal bankAmount,
+                             BigDecimal netAmount, BigDecimal taxAmount, BigDecimal cogsAmount,
+                             Long sourceId, String actingUsername) {
+        PostingRule rule = postingRuleRepository.findByCompanyId(companyId).orElse(null);
+        if (rule == null) return;
+
+        List<Line> lines = new ArrayList<>();
+        if (cashAmount.signum() > 0) {
+            lines.add(new Line(rule.getDefaultCashAccountId(), cashAmount, BigDecimal.ZERO));
+        }
+        if (bankAmount.signum() > 0) {
+            lines.add(new Line(rule.getDefaultBankAccountId(), bankAmount, BigDecimal.ZERO));
+        }
+        lines.add(new Line(rule.getSalesRevenueAccountId(), BigDecimal.ZERO, netAmount));
+        if (taxAmount.signum() > 0) {
+            lines.add(new Line(rule.getTaxPayableAccountId(), BigDecimal.ZERO, taxAmount));
+        }
+        if (cogsAmount.signum() > 0) {
+            lines.add(new Line(rule.getPurchaseExpenseAccountId(), cogsAmount, BigDecimal.ZERO));
+            lines.add(new Line(rule.getInventoryAssetAccountId(), BigDecimal.ZERO, cogsAmount));
+        }
+        createAutoEntry(companyId, date, "POS sale", "POS_SALE", sourceId, actingUsername, lines);
+    }
+
+    @Override
+    @Transactional
+    public void postCashVariance(Long companyId, LocalDate date, BigDecimal variance, Long sourceId, String actingUsername) {
+        if (variance.signum() == 0) return;
+        PostingRule rule = postingRuleRepository.findByCompanyId(companyId).orElse(null);
+        if (rule == null) return;
+
+        List<Line> lines;
+        if (variance.signum() > 0) {
+            lines = List.of(
+                    new Line(rule.getDefaultCashAccountId(), variance, BigDecimal.ZERO),
+                    new Line(rule.getCashVarianceAccountId(), BigDecimal.ZERO, variance)
+            );
+        } else {
+            BigDecimal shortAmount = variance.negate();
+            lines = List.of(
+                    new Line(rule.getCashVarianceAccountId(), shortAmount, BigDecimal.ZERO),
+                    new Line(rule.getDefaultCashAccountId(), BigDecimal.ZERO, shortAmount)
+            );
+        }
+        createAutoEntry(companyId, date, "Cash variance", "POS_CASH_VARIANCE", sourceId, actingUsername, lines);
+    }
+
     private Long cashOrBankAccountId(PostingRule rule, PaymentMethod method) {
         return method == PaymentMethod.CASH ? rule.getDefaultCashAccountId() : rule.getDefaultBankAccountId();
     }

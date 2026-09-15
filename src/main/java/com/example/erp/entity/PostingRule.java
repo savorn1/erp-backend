@@ -89,4 +89,15 @@ public class PostingRule {
 
     @Column(name = "asset_disposal_gain_loss_account_id")
     private Long assetDisposalGainLossAccountId;
+
+    // POS: credited when a sale's inventory is relieved (paired with the
+    // existing purchaseExpenseAccountId as the COGS debit — see
+    // AutoPostingServiceImpl.postPosSale).
+    @Column(name = "inventory_asset_account_id")
+    private Long inventoryAssetAccountId;
+
+    // POS: Dr/Cr'd for a session's over/short at close — no standard seed
+    // code fits this, so it's left unmapped unless the admin sets it.
+    @Column(name = "cash_variance_account_id")
+    private Long cashVarianceAccountId;
 }

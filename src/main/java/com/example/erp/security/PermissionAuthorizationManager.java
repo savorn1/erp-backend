@@ -42,7 +42,7 @@ public class PermissionAuthorizationManager implements AuthorizationManager<Requ
 
     private static final Set<String> APPROVAL_KEYWORDS = Set.of(
             "approve", "reject", "post", "dispose", "cancel", "reverse",
-            "close", "reopen", "ship", "complete", "receive"
+            "close", "reopen", "ship", "complete", "receive", "void", "checkout"
     );
     private static final Set<String> APPROVAL_PREFIXES = Set.of("run-", "seed");
 

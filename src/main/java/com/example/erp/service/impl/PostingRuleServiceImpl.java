@@ -48,6 +48,7 @@ public class PostingRuleServiceImpl implements PostingRuleService {
     private static final String CODE_DEPRECIATION_EXPENSE = "5500";
     private static final String CODE_ACCUMULATED_DEPRECIATION = "1250";
     private static final String CODE_ASSET_DISPOSAL_GAIN_LOSS = "5900";
+    private static final String CODE_INVENTORY_ASSET = "1140";
 
     @Override
     @Transactional(readOnly = true)
@@ -68,7 +69,8 @@ public class PostingRuleServiceImpl implements PostingRuleService {
                 request.getTaxPayableAccountId(), request.getTaxReceivableAccountId(),
                 request.getDefaultCashAccountId(), request.getDefaultBankAccountId(),
                 request.getFixedAssetCostAccountId(), request.getDepreciationExpenseAccountId(),
-                request.getAccumulatedDepreciationAccountId(), request.getAssetDisposalGainLossAccountId()
+                request.getAccumulatedDepreciationAccountId(), request.getAssetDisposalGainLossAccountId(),
+                request.getInventoryAssetAccountId(), request.getCashVarianceAccountId()
         ).filter(Objects::nonNull).distinct().toList();
 
         Map<Long, Account> accounts = accountRepository.findAllById(accountIds).stream()
@@ -99,6 +101,8 @@ public class PostingRuleServiceImpl implements PostingRuleService {
         rule.setDepreciationExpenseAccountId(request.getDepreciationExpenseAccountId());
         rule.setAccumulatedDepreciationAccountId(request.getAccumulatedDepreciationAccountId());
         rule.setAssetDisposalGainLossAccountId(request.getAssetDisposalGainLossAccountId());
+        rule.setInventoryAssetAccountId(request.getInventoryAssetAccountId());
+        rule.setCashVarianceAccountId(request.getCashVarianceAccountId());
         postingRuleRepository.save(rule);
         return toResponse(rule);
     }
@@ -128,6 +132,7 @@ public class PostingRuleServiceImpl implements PostingRuleService {
         if (rule.getDepreciationExpenseAccountId() == null) rule.setDepreciationExpenseAccountId(idFor(byCode, CODE_DEPRECIATION_EXPENSE));
         if (rule.getAccumulatedDepreciationAccountId() == null) rule.setAccumulatedDepreciationAccountId(idFor(byCode, CODE_ACCUMULATED_DEPRECIATION));
         if (rule.getAssetDisposalGainLossAccountId() == null) rule.setAssetDisposalGainLossAccountId(idFor(byCode, CODE_ASSET_DISPOSAL_GAIN_LOSS));
+        if (rule.getInventoryAssetAccountId() == null) rule.setInventoryAssetAccountId(idFor(byCode, CODE_INVENTORY_ASSET));
         postingRuleRepository.save(rule);
         return toResponse(rule);
     }
@@ -153,6 +158,8 @@ public class PostingRuleServiceImpl implements PostingRuleService {
         accountIds.add(rule.getDepreciationExpenseAccountId());
         accountIds.add(rule.getAccumulatedDepreciationAccountId());
         accountIds.add(rule.getAssetDisposalGainLossAccountId());
+        accountIds.add(rule.getInventoryAssetAccountId());
+        accountIds.add(rule.getCashVarianceAccountId());
         accountIds.removeIf(Objects::isNull);
         Map<Long, Account> accounts = accountRepository.findAllById(accountIds).stream()
                 .collect(Collectors.toMap(Account::getId, a -> a));
@@ -190,6 +197,10 @@ public class PostingRuleServiceImpl implements PostingRuleService {
                 .accumulatedDepreciationAccountLabel(label(accounts, rule.getAccumulatedDepreciationAccountId()))
                 .assetDisposalGainLossAccountId(rule.getAssetDisposalGainLossAccountId())
                 .assetDisposalGainLossAccountLabel(label(accounts, rule.getAssetDisposalGainLossAccountId()))
+                .inventoryAssetAccountId(rule.getInventoryAssetAccountId())
+                .inventoryAssetAccountLabel(label(accounts, rule.getInventoryAssetAccountId()))
+                .cashVarianceAccountId(rule.getCashVarianceAccountId())
+                .cashVarianceAccountLabel(label(accounts, rule.getCashVarianceAccountId()))
                 .build();
     }
 

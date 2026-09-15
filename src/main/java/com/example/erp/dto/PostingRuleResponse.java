@@ -43,4 +43,8 @@ public class PostingRuleResponse {
     private String accumulatedDepreciationAccountLabel;
     private Long assetDisposalGainLossAccountId;
     private String assetDisposalGainLossAccountLabel;
+    private Long inventoryAssetAccountId;
+    private String inventoryAssetAccountLabel;
+    private Long cashVarianceAccountId;
+    private String cashVarianceAccountLabel;
 }

@@ -27,4 +27,6 @@ public class PostingRuleRequest {
     private Long depreciationExpenseAccountId;
     private Long accumulatedDepreciationAccountId;
     private Long assetDisposalGainLossAccountId;
+    private Long inventoryAssetAccountId;
+    private Long cashVarianceAccountId;
 }
