@@ -235,12 +235,20 @@ public class StockCountServiceImpl implements StockCountService {
         stockCountRepository.deleteById(id);
     }
 
+    // When binId is null, the count line isn't pinned to one bin — sum every
+    // bin (plus the unbinned row, if any) this product holds at the
+    // warehouse. Without this, a binned product snapshots systemQuantity as
+    // zero, and the physical count then reconciles into a phantom
+    // STOCK_INCREASE that duplicates stock instead of correcting it.
     private BigDecimal availableQuantity(Long productId, Long warehouseId, Long binId) {
-        StockLevel stockLevel = (binId == null
-                ? stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(productId, warehouseId)
-                : stockLevelRepository.findByProductIdAndWarehouseIdAndBinId(productId, warehouseId, binId))
-                .orElse(null);
-        return stockLevel == null ? BigDecimal.ZERO : stockLevel.getQuantityOnHand();
+        if (binId != null) {
+            return stockLevelRepository.findByProductIdAndWarehouseIdAndBinId(productId, warehouseId, binId)
+                    .map(StockLevel::getQuantityOnHand)
+                    .orElse(BigDecimal.ZERO);
+        }
+        return stockLevelRepository.findByProductIdAndWarehouseId(productId, warehouseId).stream()
+                .map(StockLevel::getQuantityOnHand)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     private void requireBinInWarehouse(Long binId, Long warehouseId) {

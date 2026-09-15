@@ -48,6 +48,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -338,25 +339,52 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                         .build()));
     }
 
+    // When binId is null, the adjustment line isn't pinned to one specific
+    // bin — sum every bin (plus the unbinned row, if any) this product holds
+    // at the warehouse, rather than only the unbinned row. Without this, a
+    // product received into a bin via GoodsReceipt looks out of stock
+    // whenever a decrease line leaves "bin" unset.
     private BigDecimal availableQuantity(Long productId, Long warehouseId, Long binId) {
-        StockLevel stockLevel = (binId == null
-                ? stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(productId, warehouseId)
-                : stockLevelRepository.findByProductIdAndWarehouseIdAndBinId(productId, warehouseId, binId))
-                .orElse(null);
-        return stockLevel == null ? BigDecimal.ZERO : stockLevel.getQuantityOnHand();
+        if (binId != null) {
+            return stockLevelRepository.findByProductIdAndWarehouseIdAndBinId(productId, warehouseId, binId)
+                    .map(StockLevel::getQuantityOnHand)
+                    .orElse(BigDecimal.ZERO);
+        }
+        return stockLevelRepository.findByProductIdAndWarehouseId(productId, warehouseId).stream()
+                .map(StockLevel::getQuantityOnHand)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    // Mirrors availableQuantity's "no specific bin" semantics: pulls from
+    // whichever bin(s) actually hold the stock, largest first, until the
+    // requested quantity is satisfied.
     private void decreaseStock(Long productId, Long warehouseId, Long binId, BigDecimal quantity) {
-        StockLevel stockLevel = (binId == null
-                ? stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(productId, warehouseId)
-                : stockLevelRepository.findByProductIdAndWarehouseIdAndBinId(productId, warehouseId, binId))
-                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "No stock on hand for this product at the selected location"));
-        BigDecimal updated = stockLevel.getQuantityOnHand().subtract(quantity);
-        if (updated.compareTo(BigDecimal.ZERO) < 0) {
+        if (binId != null) {
+            StockLevel stockLevel = stockLevelRepository.findByProductIdAndWarehouseIdAndBinId(productId, warehouseId, binId)
+                    .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "No stock on hand for this product at the selected location"));
+            BigDecimal updated = stockLevel.getQuantityOnHand().subtract(quantity);
+            if (updated.compareTo(BigDecimal.ZERO) < 0) {
+                throw new AppException(HttpStatus.BAD_REQUEST, "Insufficient stock on hand for this product at the selected location");
+            }
+            stockLevel.setQuantityOnHand(updated);
+            stockLevelRepository.save(stockLevel);
+            return;
+        }
+
+        List<StockLevel> stockLevels = stockLevelRepository.findByProductIdAndWarehouseId(productId, warehouseId).stream()
+                .sorted(Comparator.comparing(StockLevel::getQuantityOnHand).reversed())
+                .toList();
+        BigDecimal remaining = quantity;
+        for (StockLevel stockLevel : stockLevels) {
+            if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
+            BigDecimal take = stockLevel.getQuantityOnHand().min(remaining);
+            stockLevel.setQuantityOnHand(stockLevel.getQuantityOnHand().subtract(take));
+            stockLevelRepository.save(stockLevel);
+            remaining = remaining.subtract(take);
+        }
+        if (remaining.compareTo(BigDecimal.ZERO) > 0) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Insufficient stock on hand for this product at the selected location");
         }
-        stockLevel.setQuantityOnHand(updated);
-        stockLevelRepository.save(stockLevel);
     }
 
     private void increaseStock(Long companyId, Long productId, Long warehouseId, Long binId, BigDecimal quantity) {

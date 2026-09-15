@@ -212,10 +212,14 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return toFullResponse(so, lines);
     }
 
+    // Sums every bin (plus the unbinned row, if any) this product holds at
+    // the warehouse — a product received into a bin via GoodsReceipt would
+    // otherwise look permanently out of stock here, since this only ever
+    // reads, never targets, a specific bin.
     private BigDecimal availableQuantity(Long productId, Long warehouseId) {
-        return stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(productId, warehouseId)
+        return stockLevelRepository.findByProductIdAndWarehouseId(productId, warehouseId).stream()
                 .map(StockLevel::getQuantityOnHand)
-                .orElse(BigDecimal.ZERO);
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     @Override

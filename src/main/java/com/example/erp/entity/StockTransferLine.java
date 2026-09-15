@@ -36,6 +36,19 @@ public class StockTransferLine {
     @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal quantityRequested;
 
+    // The unit quantityRequested/quantityShipped/quantityReceived are
+    // expressed in — same reasoning as PurchaseOrderLine.unitOfMeasureId.
+    // Null means the product's own base unit, factor 1.
+    @Column(name = "unit_of_measure_id")
+    private Long unitOfMeasureId;
+
+    // Snapshotted from ProductUom.conversionFactor at request time — how
+    // many of the product's base/inventory unit equal 1 of unitOfMeasureId
+    // above. Frozen here so editing that ProductUom row afterward can't
+    // silently change what an already-requested transfer meant.
+    @Column(name = "conversion_factor", precision = 19, scale = 6)
+    private BigDecimal conversionFactor;
+
     @Column(name = "source_bin_id")
     private Long sourceBinId;
 

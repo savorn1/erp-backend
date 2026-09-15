@@ -9,6 +9,7 @@ import com.example.erp.exception.AppException;
 import com.example.erp.repository.AccountRepository;
 import com.example.erp.repository.CompanyRepository;
 import com.example.erp.repository.PostingRuleRepository;
+import com.example.erp.service.AccountService;
 import com.example.erp.service.PostingRuleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -28,6 +29,21 @@ public class PostingRuleServiceImpl implements PostingRuleService {
     private final PostingRuleRepository postingRuleRepository;
     private final CompanyRepository companyRepository;
     private final AccountRepository accountRepository;
+    private final AccountService accountService;
+
+    // One default account code per module — matches AccountServiceImpl's
+    // standard seed chart exactly, so seedFromChartOfAccounts can always
+    // find every one of these once that chart has been seeded.
+    private static final String CODE_ACCOUNTS_RECEIVABLE = "1130";
+    private static final String CODE_ACCOUNTS_PAYABLE = "2100";
+    private static final String CODE_SALES_REVENUE = "4100";
+    private static final String CODE_SALES_RETURNS = "4900";
+    private static final String CODE_PURCHASE_EXPENSE = "5100";
+    private static final String CODE_PURCHASE_RETURNS = "5150";
+    private static final String CODE_TAX_PAYABLE = "2200";
+    private static final String CODE_TAX_RECEIVABLE = "1160";
+    private static final String CODE_DEFAULT_CASH = "1110";
+    private static final String CODE_DEFAULT_BANK = "1120";
 
     @Override
     @Transactional(readOnly = true)
@@ -75,6 +91,36 @@ public class PostingRuleServiceImpl implements PostingRuleService {
         rule.setDefaultBankAccountId(request.getDefaultBankAccountId());
         postingRuleRepository.save(rule);
         return toResponse(rule);
+    }
+
+    @Override
+    @Transactional
+    public PostingRuleResponse seedFromChartOfAccounts(Long companyId) {
+        requireCompany(companyId);
+        accountService.seedSampleChartOfAccounts(companyId);
+
+        Map<String, Account> byCode = accountRepository.findByCompanyId(companyId).stream()
+                .collect(Collectors.toMap(Account::getAccountCode, a -> a, (a, b) -> a));
+
+        PostingRule rule = postingRuleRepository.findByCompanyId(companyId)
+                .orElseGet(() -> PostingRule.builder().companyId(companyId).build());
+        if (rule.getAccountsReceivableAccountId() == null) rule.setAccountsReceivableAccountId(idFor(byCode, CODE_ACCOUNTS_RECEIVABLE));
+        if (rule.getAccountsPayableAccountId() == null) rule.setAccountsPayableAccountId(idFor(byCode, CODE_ACCOUNTS_PAYABLE));
+        if (rule.getSalesRevenueAccountId() == null) rule.setSalesRevenueAccountId(idFor(byCode, CODE_SALES_REVENUE));
+        if (rule.getSalesReturnsAccountId() == null) rule.setSalesReturnsAccountId(idFor(byCode, CODE_SALES_RETURNS));
+        if (rule.getPurchaseExpenseAccountId() == null) rule.setPurchaseExpenseAccountId(idFor(byCode, CODE_PURCHASE_EXPENSE));
+        if (rule.getPurchaseReturnsAccountId() == null) rule.setPurchaseReturnsAccountId(idFor(byCode, CODE_PURCHASE_RETURNS));
+        if (rule.getTaxPayableAccountId() == null) rule.setTaxPayableAccountId(idFor(byCode, CODE_TAX_PAYABLE));
+        if (rule.getTaxReceivableAccountId() == null) rule.setTaxReceivableAccountId(idFor(byCode, CODE_TAX_RECEIVABLE));
+        if (rule.getDefaultCashAccountId() == null) rule.setDefaultCashAccountId(idFor(byCode, CODE_DEFAULT_CASH));
+        if (rule.getDefaultBankAccountId() == null) rule.setDefaultBankAccountId(idFor(byCode, CODE_DEFAULT_BANK));
+        postingRuleRepository.save(rule);
+        return toResponse(rule);
+    }
+
+    private Long idFor(Map<String, Account> byCode, String code) {
+        Account account = byCode.get(code);
+        return account == null ? null : account.getId();
     }
 
     private PostingRuleResponse toResponse(PostingRule rule) {

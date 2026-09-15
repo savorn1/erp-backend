@@ -13,4 +13,6 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
     boolean existsByCompanyIdAndBarcode(Long companyId, String barcode);
 
     boolean existsByCompanyIdAndBarcodeAndIdNot(Long companyId, String barcode, Long id);
+
+    boolean existsByUnitOfMeasureId(Long unitOfMeasureId);
 }

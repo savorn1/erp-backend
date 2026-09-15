@@ -382,9 +382,12 @@ public class ManufacturingReportServiceImpl implements ManufacturingReportServic
         for (Map.Entry<Key, BigDecimal> entry : requiredByKey.entrySet()) {
             Product product = products.get(entry.getKey().componentProductId());
             Warehouse warehouse = warehouses.get(entry.getKey().warehouseId());
-            BigDecimal available = stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(
+            // Sums every bin (plus the unbinned row, if any) — a component
+            // received into a bin via GoodsReceipt would otherwise show as
+            // unavailable here, flagging a false shortage.
+            BigDecimal available = stockLevelRepository.findByProductIdAndWarehouseId(
                     entry.getKey().componentProductId(), entry.getKey().warehouseId()
-            ).map(StockLevel::getQuantityOnHand).orElse(BigDecimal.ZERO);
+            ).stream().map(StockLevel::getQuantityOnHand).reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal shortfall = entry.getValue().subtract(available);
             if (shortfall.signum() < 0) shortfall = BigDecimal.ZERO;
             if (shortfall.signum() > 0) shortageCount++;

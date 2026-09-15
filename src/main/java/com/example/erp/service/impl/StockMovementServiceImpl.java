@@ -5,6 +5,7 @@ import com.example.erp.dto.StockMovementFilterRequest;
 import com.example.erp.dto.StockMovementResponse;
 import com.example.erp.entity.Product;
 import com.example.erp.entity.StockMovement;
+import com.example.erp.entity.StockMovementDirection;
 import com.example.erp.entity.Warehouse;
 import com.example.erp.entity.WarehouseBin;
 import com.example.erp.repository.ProductRepository;
@@ -20,6 +21,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +52,12 @@ public class StockMovementServiceImpl implements StockMovementService {
         }
         if (filter.getType() != null) {
             conditions.add((root, query, cb) -> cb.equal(root.get("type"), filter.getType()));
+        }
+        if (filter.getDirection() != null) {
+            boolean in = filter.getDirection() == StockMovementDirection.IN;
+            conditions.add((root, query, cb) -> in
+                    ? cb.ge(root.get("quantityDelta"), BigDecimal.ZERO)
+                    : cb.lt(root.get("quantityDelta"), BigDecimal.ZERO));
         }
         if (filter.getDateFrom() != null) {
             conditions.add((root, query, cb) -> cb.greaterThanOrEqualTo(root.get("createdAt"), filter.getDateFrom().atStartOfDay()));
@@ -86,6 +94,7 @@ public class StockMovementServiceImpl implements StockMovementService {
                     .binId(m.getBinId())
                     .binName(m.getBinId() == null ? null : binNames.get(m.getBinId()))
                     .type(m.getType().name())
+                    .direction(m.getQuantityDelta().signum() >= 0 ? "IN" : "OUT")
                     .quantityDelta(m.getQuantityDelta())
                     .referenceType(m.getReferenceType())
                     .referenceId(m.getReferenceId())

@@ -7,6 +7,8 @@ import com.example.erp.dto.UnitOfMeasureResponse;
 import com.example.erp.entity.UnitOfMeasure;
 import com.example.erp.entity.UomCategory;
 import com.example.erp.exception.AppException;
+import com.example.erp.repository.ProductRepository;
+import com.example.erp.repository.ProductUomRepository;
 import com.example.erp.repository.UnitOfMeasureRepository;
 import com.example.erp.repository.UomCategoryRepository;
 import com.example.erp.repository.UomConversionRepository;
@@ -33,6 +35,8 @@ public class UnitOfMeasureServiceImpl implements UnitOfMeasureService {
     private final UnitOfMeasureRepository repository;
     private final UomCategoryRepository uomCategoryRepository;
     private final UomConversionRepository uomConversionRepository;
+    private final ProductRepository productRepository;
+    private final ProductUomRepository productUomRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -139,6 +143,12 @@ public class UnitOfMeasureServiceImpl implements UnitOfMeasureService {
         UomCategory category = categoryOf(uom.getCategoryId());
         if (category != null && id.equals(category.getBaseUnitId())) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Cannot delete a category's base unit — assign a different base unit first");
+        }
+        if (productRepository.existsByUnitOfMeasureId(id)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Cannot delete a unit of measure that a product uses as its base unit");
+        }
+        if (productUomRepository.existsByUnitOfMeasureId(id)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Cannot delete a unit of measure that a product's alternate UOMs use");
         }
         uomConversionRepository.deleteByFromUnitOfMeasureIdOrToUnitOfMeasureId(id, id);
         repository.delete(uom);

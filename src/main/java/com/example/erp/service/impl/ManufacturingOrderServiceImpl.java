@@ -65,6 +65,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -466,20 +467,33 @@ public class ManufacturingOrderServiceImpl implements ManufacturingOrderService 
         return all.stream().collect(Collectors.groupingBy(ManufacturingOrderMaterial::getManufacturingOrderId));
     }
 
+    // Material lines don't pin a bin — components are just as likely to have
+    // been received into one via GoodsReceipt, so this sums every bin (plus
+    // the unbinned row, if any) rather than only the unbinned row. Without
+    // this, any binned component looked permanently out of stock here.
     private BigDecimal availableQuantity(Long productId, Long warehouseId) {
-        StockLevel stockLevel = stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(productId, warehouseId).orElse(null);
-        return stockLevel == null ? BigDecimal.ZERO : stockLevel.getQuantityOnHand();
+        return stockLevelRepository.findByProductIdAndWarehouseId(productId, warehouseId).stream()
+                .map(StockLevel::getQuantityOnHand)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    // Mirrors availableQuantity's aggregate semantics: pulls from whichever
+    // bin(s) actually hold the component, largest first, until satisfied.
     private void decreaseStock(Long productId, Long warehouseId, BigDecimal quantity) {
-        StockLevel stockLevel = stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(productId, warehouseId)
-                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "No stock on hand for this component at the selected warehouse"));
-        BigDecimal updated = stockLevel.getQuantityOnHand().subtract(quantity);
-        if (updated.compareTo(BigDecimal.ZERO) < 0) {
+        List<StockLevel> stockLevels = stockLevelRepository.findByProductIdAndWarehouseId(productId, warehouseId).stream()
+                .sorted(Comparator.comparing(StockLevel::getQuantityOnHand).reversed())
+                .toList();
+        BigDecimal remaining = quantity;
+        for (StockLevel stockLevel : stockLevels) {
+            if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
+            BigDecimal take = stockLevel.getQuantityOnHand().min(remaining);
+            stockLevel.setQuantityOnHand(stockLevel.getQuantityOnHand().subtract(take));
+            stockLevelRepository.save(stockLevel);
+            remaining = remaining.subtract(take);
+        }
+        if (remaining.compareTo(BigDecimal.ZERO) > 0) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Insufficient stock on hand for this component at the selected warehouse");
         }
-        stockLevel.setQuantityOnHand(updated);
-        stockLevelRepository.save(stockLevel);
     }
 
     private void increaseStock(Long companyId, Long productId, Long warehouseId, BigDecimal quantity) {

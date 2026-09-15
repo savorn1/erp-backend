@@ -19,6 +19,8 @@ public class StockTransferLineResponse {
     private String productName;
     private String productSku;
     private BigDecimal quantityRequested;
+    private Long unitOfMeasureId;
+    private String unitOfMeasureAbbreviation;
     private Long sourceBinId;
     private String sourceBinName;
     private Long destinationBinId;

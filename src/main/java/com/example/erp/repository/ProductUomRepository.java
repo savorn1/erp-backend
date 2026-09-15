@@ -38,4 +38,6 @@ public interface ProductUomRepository extends JpaRepository<ProductUom, Long> {
     List<ProductUom> findByProductIdInAndVariantIdIsNullAndDefaultPurchaseTrue(List<Long> productIds);
 
     List<ProductUom> findByProductIdInAndVariantIdIsNullAndDefaultSalesTrue(List<Long> productIds);
+
+    boolean existsByUnitOfMeasureId(Long unitOfMeasureId);
 }
