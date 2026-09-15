@@ -536,7 +536,8 @@ public class InventoryReportServiceImpl implements InventoryReportService {
         for (StockAdjustmentLine line : stockAdjustmentLineRepository.findAll()) {
             if (line.getBatchId() == null) continue;
             if (adjustmentStatusById.get(line.getStockAdjustmentId()) != StockAdjustmentStatus.APPROVED) continue;
-            BigDecimal signed = line.getReason() == StockAdjustmentReason.STOCK_INCREASE ? line.getQuantity() : line.getQuantity().negate();
+            boolean isIncrease = line.getReason() == StockAdjustmentReason.STOCK_INCREASE || line.getReason() == StockAdjustmentReason.OPENING_BALANCE;
+            BigDecimal signed = isIncrease ? line.getQuantity() : line.getQuantity().negate();
             adjustedByBatch.merge(line.getBatchId(), signed, BigDecimal::add);
         }
 

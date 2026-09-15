@@ -1,5 +1,6 @@
 package com.example.erp.config;
 
+import com.example.erp.security.PermissionAuthorizationManager;
 import com.example.erp.service.JwtService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -22,6 +23,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtService jwtService;
+    private final PermissionAuthorizationManager permissionAuthorizationManager;
 
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -49,7 +51,13 @@ public class SecurityConfig {
                 // files themselves aren't sensitive, so this is public read access.
                 .requestMatchers("/uploads/**").permitAll()
                 .requestMatchers("/api/users/**", "/api/files/**").hasAnyRole("USER", "ADMIN")
-                .requestMatchers("/api/admin/**", "/actuator/**").hasRole("ADMIN")
+                .requestMatchers("/actuator/**").hasRole("ADMIN")
+                // Real per-request enforcement lives in PermissionAuthorizationManager:
+                // ADMIN always passes; USER passes only if their assigned custom
+                // role grants the (module, action) the request resolves to. Every
+                // controller's own @PreAuthorize is loosened to hasAnyRole('ADMIN','USER')
+                // so both roles can reach this matcher at all.
+                .requestMatchers("/api/admin/**").access(permissionAuthorizationManager)
                 .anyRequest().authenticated());
         return http.build();
     }

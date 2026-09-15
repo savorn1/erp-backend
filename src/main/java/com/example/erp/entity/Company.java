@@ -29,6 +29,7 @@ public class Company {
     private String name;
 
     private String logoUrl;
+    private String logoKey;
 
     private String addressLine1;
     private String addressLine2;

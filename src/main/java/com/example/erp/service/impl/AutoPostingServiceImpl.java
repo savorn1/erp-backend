@@ -1,6 +1,7 @@
 package com.example.erp.service.impl;
 
 import com.example.erp.entity.CreditNote;
+import com.example.erp.entity.FixedAsset;
 import com.example.erp.entity.Invoice;
 import com.example.erp.entity.JournalEntry;
 import com.example.erp.entity.JournalEntryLine;
@@ -136,6 +137,55 @@ public class AutoPostingServiceImpl implements AutoPostingService {
         );
         createAutoEntry(creditNote.getCompanyId(), creditNote.getCreditNoteDate(), "Purchase credit note " + creditNote.getCreditNoteNumber(),
                 "PURCHASE_CREDIT_NOTE", creditNote.getId(), actingUsername, lines);
+    }
+
+    @Override
+    @Transactional
+    public void postFixedAssetAcquisition(FixedAsset asset, String actingUsername) {
+        PostingRule rule = postingRuleRepository.findByCompanyId(asset.getCompanyId()).orElse(null);
+        if (rule == null) return;
+
+        List<Line> lines = List.of(
+                new Line(rule.getFixedAssetCostAccountId(), asset.getAcquisitionCost(), BigDecimal.ZERO),
+                new Line(rule.getAccountsPayableAccountId(), BigDecimal.ZERO, asset.getAcquisitionCost())
+        );
+        createAutoEntry(asset.getCompanyId(), asset.getAcquisitionDate(), "Acquisition of asset " + asset.getAssetCode(),
+                "FIXED_ASSET_ACQUISITION", asset.getId(), actingUsername, lines);
+    }
+
+    @Override
+    @Transactional
+    public void postDepreciationRun(Long companyId, LocalDate date, BigDecimal totalAmount, Long sourceId, String actingUsername) {
+        PostingRule rule = postingRuleRepository.findByCompanyId(companyId).orElse(null);
+        if (rule == null) return;
+
+        List<Line> lines = List.of(
+                new Line(rule.getDepreciationExpenseAccountId(), totalAmount, BigDecimal.ZERO),
+                new Line(rule.getAccumulatedDepreciationAccountId(), BigDecimal.ZERO, totalAmount)
+        );
+        createAutoEntry(companyId, date, "Depreciation run", "DEPRECIATION_RUN", sourceId, actingUsername, lines);
+    }
+
+    @Override
+    @Transactional
+    public void postAssetDisposal(FixedAsset asset, BigDecimal proceeds, String actingUsername) {
+        PostingRule rule = postingRuleRepository.findByCompanyId(asset.getCompanyId()).orElse(null);
+        if (rule == null) return;
+
+        BigDecimal bookValue = asset.getAcquisitionCost().subtract(asset.getAccumulatedDepreciation());
+        BigDecimal gainLoss = proceeds.subtract(bookValue);
+
+        List<Line> lines = new ArrayList<>();
+        lines.add(new Line(rule.getDefaultBankAccountId(), proceeds, BigDecimal.ZERO));
+        lines.add(new Line(rule.getAccumulatedDepreciationAccountId(), asset.getAccumulatedDepreciation(), BigDecimal.ZERO));
+        lines.add(new Line(rule.getFixedAssetCostAccountId(), BigDecimal.ZERO, asset.getAcquisitionCost()));
+        if (gainLoss.signum() > 0) {
+            lines.add(new Line(rule.getAssetDisposalGainLossAccountId(), BigDecimal.ZERO, gainLoss));
+        } else if (gainLoss.signum() < 0) {
+            lines.add(new Line(rule.getAssetDisposalGainLossAccountId(), gainLoss.negate(), BigDecimal.ZERO));
+        }
+        createAutoEntry(asset.getCompanyId(), asset.getDisposalDate(), "Disposal of asset " + asset.getAssetCode(),
+                "FIXED_ASSET_DISPOSAL", asset.getId(), actingUsername, lines);
     }
 
     private Long cashOrBankAccountId(PostingRule rule, PaymentMethod method) {

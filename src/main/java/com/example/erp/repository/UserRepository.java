@@ -21,4 +21,6 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     boolean existsByDepartmentId(Long departmentId);
 
     long countByDepartmentId(Long departmentId);
+
+    boolean existsByCustomRoleId(Long customRoleId);
 }

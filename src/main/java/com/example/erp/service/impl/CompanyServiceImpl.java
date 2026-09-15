@@ -6,13 +6,14 @@ import com.example.erp.dto.CreateCompanyRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.UpdateCompanyRequest;
 import com.example.erp.dto.UpdateCompanyStatusRequest;
+import com.example.erp.dto.FileUploadResponse;
 import com.example.erp.entity.Company;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.CompanyRepository;
 import com.example.erp.service.CompanyService;
+import com.example.erp.service.FileStorageService;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -21,11 +22,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -34,9 +30,7 @@ import java.util.List;
 public class CompanyServiceImpl implements CompanyService {
 
     private final CompanyRepository companyRepository;
-
-    @Value("${app.upload-dir}")
-    private String uploadDir;
+    private final FileStorageService fileStorageService;
 
     @Override
     @Transactional(readOnly = true)
@@ -126,44 +120,23 @@ public class CompanyServiceImpl implements CompanyService {
             throw new AppException(HttpStatus.BAD_REQUEST, "Logo must be an image file");
         }
 
-        try {
-            Path dir = Paths.get(uploadDir, "companies", String.valueOf(id));
-            Files.createDirectories(dir);
-
-            // Best-effort cleanup of the previous logo so replacing it doesn't leave
-            // an orphaned file behind — failure here shouldn't block the new upload.
-            if (company.getLogoUrl() != null) {
-                String previousFilename = company.getLogoUrl().substring(company.getLogoUrl().lastIndexOf('/') + 1);
-                Files.deleteIfExists(dir.resolve(previousFilename));
-            }
-
-            String filename = "logo-" + System.currentTimeMillis() + extensionFor(contentType, file.getOriginalFilename());
-            Files.copy(file.getInputStream(), dir.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
-
-            company.setLogoUrl("/uploads/companies/" + id + "/" + filename);
-            companyRepository.save(company);
-            return toResponse(company);
-        } catch (IOException e) {
-            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to store company logo: " + e.getMessage());
+        // Best-effort cleanup of the previous logo so replacing it doesn't leave
+        // an orphaned object behind — failure here shouldn't block the new upload.
+        if (company.getLogoKey() != null) {
+            fileStorageService.delete(company.getLogoKey());
         }
+
+        FileUploadResponse uploaded = fileStorageService.upload(file, "companies/" + id);
+        company.setLogoUrl(uploaded.getUrl());
+        company.setLogoKey(uploaded.getKey());
+        companyRepository.save(company);
+        return toResponse(company);
     }
 
     @Override
     @Transactional
     public void deleteCompany(Long id) {
         companyRepository.delete(findCompany(id));
-    }
-
-    private String extensionFor(String contentType, String originalFilename) {
-        if (originalFilename != null && originalFilename.contains(".")) {
-            return originalFilename.substring(originalFilename.lastIndexOf('.'));
-        }
-        return switch (contentType) {
-            case "image/png" -> ".png";
-            case "image/webp" -> ".webp";
-            case "image/gif" -> ".gif";
-            default -> ".jpg";
-        };
     }
 
     private Company findCompany(Long id) {

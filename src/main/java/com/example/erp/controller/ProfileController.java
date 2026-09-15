@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 // Self-service profile endpoints for the currently authenticated user (USER or
 // ADMIN), kept separate from UserController (admin-only, class-level
-// @PreAuthorize("hasRole('ADMIN')")) so these are reachable by any
+// @PreAuthorize("hasAnyRole('ADMIN','USER')")) so these are reachable by any
 // authenticated user without needing a per-method override there.
 @RestController
 @RequestMapping("/api/users/me")

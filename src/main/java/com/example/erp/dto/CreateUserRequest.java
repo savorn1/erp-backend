@@ -29,4 +29,8 @@ public class CreateUserRequest {
     private Long companyId;
     private Long branchId;
     private Long departmentId;
+
+    // Only meaningful when role == USER — see PermissionAuthorizationManager.
+    // Can also be set/changed later via PUT /{id}/custom-role.
+    private Long customRoleId;
 }

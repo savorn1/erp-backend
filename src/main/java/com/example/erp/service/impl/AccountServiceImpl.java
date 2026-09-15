@@ -191,7 +191,8 @@ public class AccountServiceImpl implements AccountService {
                         SeedNode.of("5400", "Utilities"),
                         SeedNode.of("5500", "Depreciation"),
                         SeedNode.of("5600", "Transportation"),
-                        SeedNode.of("5700", "Office Expenses")))
+                        SeedNode.of("5700", "Office Expenses"),
+                        SeedNode.of("5900", "Gain/Loss on Asset Disposal")))
         );
 
         // Existing codes are kept exactly as they are (name, parent, type) —

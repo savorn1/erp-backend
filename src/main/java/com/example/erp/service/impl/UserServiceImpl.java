@@ -4,6 +4,7 @@ import com.example.erp.dto.ChangePasswordRequest;
 import com.example.erp.dto.CreateUserRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.ResetPasswordRequest;
+import com.example.erp.dto.UpdateCustomRoleRequest;
 import com.example.erp.dto.UpdateProfileRequest;
 import com.example.erp.dto.UpdateRoleRequest;
 import com.example.erp.dto.UpdateStatusRequest;
@@ -13,10 +14,12 @@ import com.example.erp.dto.UserResponse;
 import com.example.erp.entity.Branch;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.Department;
+import com.example.erp.entity.CustomRole;
 import com.example.erp.entity.User;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.BranchRepository;
 import com.example.erp.repository.CompanyRepository;
+import com.example.erp.repository.CustomRoleRepository;
 import com.example.erp.repository.DepartmentRepository;
 import com.example.erp.repository.RefreshTokenRepository;
 import com.example.erp.repository.UserRepository;
@@ -47,6 +50,7 @@ public class UserServiceImpl implements UserService {
     private final DepartmentRepository departmentRepository;
     private final CompanyRepository companyRepository;
     private final BranchRepository branchRepository;
+    private final CustomRoleRepository customRoleRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -90,11 +94,15 @@ public class UserServiceImpl implements UserService {
         Map<Long, String> branchNames = branchRepository.findAllById(
                 content.stream().map(User::getBranchId).filter(Objects::nonNull).distinct().toList()
         ).stream().collect(Collectors.toMap(Branch::getId, Branch::getName));
+        Map<Long, String> customRoleNames = customRoleRepository.findAllById(
+                content.stream().map(User::getCustomRoleId).filter(Objects::nonNull).distinct().toList()
+        ).stream().collect(Collectors.toMap(CustomRole::getId, CustomRole::getName));
 
         return PageResponse.of(users.map(u -> toResponse(u,
                 u.getCompanyId() == null ? null : companyNames.get(u.getCompanyId()),
                 u.getBranchId() == null ? null : branchNames.get(u.getBranchId()),
-                u.getDepartmentId() == null ? null : departmentNames.get(u.getDepartmentId()))));
+                u.getDepartmentId() == null ? null : departmentNames.get(u.getDepartmentId()),
+                u.getCustomRoleId() == null ? null : customRoleNames.get(u.getCustomRoleId()))));
     }
 
     @Override
@@ -113,6 +121,9 @@ public class UserServiceImpl implements UserService {
             throw new AppException(HttpStatus.CONFLICT, "Email already in use: " + email);
         }
         validateAssignments(request.getCompanyId(), request.getBranchId(), request.getDepartmentId());
+        if (request.getCustomRoleId() != null) {
+            requireCustomRole(request.getCustomRoleId());
+        }
 
         User user = User.builder()
                 .username(request.getUsername())
@@ -123,6 +134,7 @@ public class UserServiceImpl implements UserService {
                 .companyId(request.getCompanyId())
                 .branchId(request.getBranchId())
                 .departmentId(request.getDepartmentId())
+                .customRoleId(request.getCustomRoleId())
                 .build();
         userRepository.save(user);
         return toResponse(user);
@@ -175,6 +187,30 @@ public class UserServiceImpl implements UserService {
     private Department requireDepartment(Long departmentId) {
         return departmentRepository.findById(departmentId)
                 .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Department not found with id: " + departmentId));
+    }
+
+    private CustomRole requireCustomRole(Long customRoleId) {
+        return customRoleRepository.findById(customRoleId)
+                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Custom role not found with id: " + customRoleId));
+    }
+
+    @Override
+    @Transactional
+    public UserResponse updateCustomRole(Long id, UpdateCustomRoleRequest request, String actingUsername) {
+        User user = findUser(id);
+        // Same self-escalation guard as updateRole — a USER account with
+        // permission to manage other users must not be able to grant itself
+        // a more-privileged custom role.
+        if (user.getUsername().equals(actingUsername) && !java.util.Objects.equals(user.getCustomRoleId(), request.getCustomRoleId())) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "You cannot change your own custom role");
+        }
+        if (request.getCustomRoleId() != null) {
+            requireCustomRole(request.getCustomRoleId());
+        }
+        user.setCustomRoleId(request.getCustomRoleId());
+        userRepository.save(user);
+        refreshTokenRepository.revokeAllForUser(user.getId());
+        return toResponse(user);
     }
 
     @Override
@@ -280,10 +316,11 @@ public class UserServiceImpl implements UserService {
     }
 
     private UserResponse toResponse(User user) {
-        return toResponse(user, companyNameOf(user.getCompanyId()), branchNameOf(user.getBranchId()), departmentNameOf(user.getDepartmentId()));
+        return toResponse(user, companyNameOf(user.getCompanyId()), branchNameOf(user.getBranchId()), departmentNameOf(user.getDepartmentId()),
+                customRoleNameOf(user.getCustomRoleId()));
     }
 
-    private UserResponse toResponse(User user, String companyName, String branchName, String departmentName) {
+    private UserResponse toResponse(User user, String companyName, String branchName, String departmentName, String customRoleName) {
         return UserResponse.builder()
                 .id(user.getId())
                 .username(user.getUsername())
@@ -296,6 +333,8 @@ public class UserServiceImpl implements UserService {
                 .branchName(branchName)
                 .departmentId(user.getDepartmentId())
                 .departmentName(departmentName)
+                .customRoleId(user.getCustomRoleId())
+                .customRoleName(customRoleName)
                 .build();
     }
 
@@ -309,5 +348,9 @@ public class UserServiceImpl implements UserService {
 
     private String departmentNameOf(Long departmentId) {
         return departmentId == null ? null : departmentRepository.findById(departmentId).map(Department::getName).orElse(null);
+    }
+
+    private String customRoleNameOf(Long customRoleId) {
+        return customRoleId == null ? null : customRoleRepository.findById(customRoleId).map(CustomRole::getName).orElse(null);
     }
 }

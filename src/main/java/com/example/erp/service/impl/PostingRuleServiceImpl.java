@@ -44,6 +44,10 @@ public class PostingRuleServiceImpl implements PostingRuleService {
     private static final String CODE_TAX_RECEIVABLE = "1160";
     private static final String CODE_DEFAULT_CASH = "1110";
     private static final String CODE_DEFAULT_BANK = "1120";
+    private static final String CODE_FIXED_ASSET_COST = "1200";
+    private static final String CODE_DEPRECIATION_EXPENSE = "5500";
+    private static final String CODE_ACCUMULATED_DEPRECIATION = "1250";
+    private static final String CODE_ASSET_DISPOSAL_GAIN_LOSS = "5900";
 
     @Override
     @Transactional(readOnly = true)
@@ -62,7 +66,9 @@ public class PostingRuleServiceImpl implements PostingRuleService {
                 request.getSalesRevenueAccountId(), request.getSalesReturnsAccountId(),
                 request.getPurchaseExpenseAccountId(), request.getPurchaseReturnsAccountId(),
                 request.getTaxPayableAccountId(), request.getTaxReceivableAccountId(),
-                request.getDefaultCashAccountId(), request.getDefaultBankAccountId()
+                request.getDefaultCashAccountId(), request.getDefaultBankAccountId(),
+                request.getFixedAssetCostAccountId(), request.getDepreciationExpenseAccountId(),
+                request.getAccumulatedDepreciationAccountId(), request.getAssetDisposalGainLossAccountId()
         ).filter(Objects::nonNull).distinct().toList();
 
         Map<Long, Account> accounts = accountRepository.findAllById(accountIds).stream()
@@ -89,6 +95,10 @@ public class PostingRuleServiceImpl implements PostingRuleService {
         rule.setTaxReceivableAccountId(request.getTaxReceivableAccountId());
         rule.setDefaultCashAccountId(request.getDefaultCashAccountId());
         rule.setDefaultBankAccountId(request.getDefaultBankAccountId());
+        rule.setFixedAssetCostAccountId(request.getFixedAssetCostAccountId());
+        rule.setDepreciationExpenseAccountId(request.getDepreciationExpenseAccountId());
+        rule.setAccumulatedDepreciationAccountId(request.getAccumulatedDepreciationAccountId());
+        rule.setAssetDisposalGainLossAccountId(request.getAssetDisposalGainLossAccountId());
         postingRuleRepository.save(rule);
         return toResponse(rule);
     }
@@ -114,6 +124,10 @@ public class PostingRuleServiceImpl implements PostingRuleService {
         if (rule.getTaxReceivableAccountId() == null) rule.setTaxReceivableAccountId(idFor(byCode, CODE_TAX_RECEIVABLE));
         if (rule.getDefaultCashAccountId() == null) rule.setDefaultCashAccountId(idFor(byCode, CODE_DEFAULT_CASH));
         if (rule.getDefaultBankAccountId() == null) rule.setDefaultBankAccountId(idFor(byCode, CODE_DEFAULT_BANK));
+        if (rule.getFixedAssetCostAccountId() == null) rule.setFixedAssetCostAccountId(idFor(byCode, CODE_FIXED_ASSET_COST));
+        if (rule.getDepreciationExpenseAccountId() == null) rule.setDepreciationExpenseAccountId(idFor(byCode, CODE_DEPRECIATION_EXPENSE));
+        if (rule.getAccumulatedDepreciationAccountId() == null) rule.setAccumulatedDepreciationAccountId(idFor(byCode, CODE_ACCUMULATED_DEPRECIATION));
+        if (rule.getAssetDisposalGainLossAccountId() == null) rule.setAssetDisposalGainLossAccountId(idFor(byCode, CODE_ASSET_DISPOSAL_GAIN_LOSS));
         postingRuleRepository.save(rule);
         return toResponse(rule);
     }
@@ -135,6 +149,10 @@ public class PostingRuleServiceImpl implements PostingRuleService {
         accountIds.add(rule.getTaxReceivableAccountId());
         accountIds.add(rule.getDefaultCashAccountId());
         accountIds.add(rule.getDefaultBankAccountId());
+        accountIds.add(rule.getFixedAssetCostAccountId());
+        accountIds.add(rule.getDepreciationExpenseAccountId());
+        accountIds.add(rule.getAccumulatedDepreciationAccountId());
+        accountIds.add(rule.getAssetDisposalGainLossAccountId());
         accountIds.removeIf(Objects::isNull);
         Map<Long, Account> accounts = accountRepository.findAllById(accountIds).stream()
                 .collect(Collectors.toMap(Account::getId, a -> a));
@@ -164,6 +182,14 @@ public class PostingRuleServiceImpl implements PostingRuleService {
                 .defaultCashAccountLabel(label(accounts, rule.getDefaultCashAccountId()))
                 .defaultBankAccountId(rule.getDefaultBankAccountId())
                 .defaultBankAccountLabel(label(accounts, rule.getDefaultBankAccountId()))
+                .fixedAssetCostAccountId(rule.getFixedAssetCostAccountId())
+                .fixedAssetCostAccountLabel(label(accounts, rule.getFixedAssetCostAccountId()))
+                .depreciationExpenseAccountId(rule.getDepreciationExpenseAccountId())
+                .depreciationExpenseAccountLabel(label(accounts, rule.getDepreciationExpenseAccountId()))
+                .accumulatedDepreciationAccountId(rule.getAccumulatedDepreciationAccountId())
+                .accumulatedDepreciationAccountLabel(label(accounts, rule.getAccumulatedDepreciationAccountId()))
+                .assetDisposalGainLossAccountId(rule.getAssetDisposalGainLossAccountId())
+                .assetDisposalGainLossAccountLabel(label(accounts, rule.getAssetDisposalGainLossAccountId()))
                 .build();
     }
 

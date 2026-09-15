@@ -19,7 +19,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/admin/products/{productId}/uoms/{productUomId}/prices")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
+@PreAuthorize("hasAnyRole('ADMIN','USER')")
 public class ProductUomPriceController {
 
     private final ProductUomPriceService service;

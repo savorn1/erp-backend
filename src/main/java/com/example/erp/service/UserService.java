@@ -5,6 +5,7 @@ import com.example.erp.dto.CreateUserRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.ResetPasswordRequest;
 import com.example.erp.dto.UpdateProfileRequest;
+import com.example.erp.dto.UpdateCustomRoleRequest;
 import com.example.erp.dto.UpdateRoleRequest;
 import com.example.erp.dto.UpdateStatusRequest;
 import com.example.erp.dto.UpdateUserRequest;
@@ -24,6 +25,8 @@ public interface UserService {
     UserResponse updateUser(Long id, UpdateUserRequest request);
 
     UserResponse updateRole(Long id, UpdateRoleRequest request, String actingUsername);
+
+    UserResponse updateCustomRole(Long id, UpdateCustomRoleRequest request, String actingUsername);
 
     UserResponse updateStatus(Long id, UpdateStatusRequest request, String actingUsername);
 

@@ -5,6 +5,7 @@ import com.example.erp.dto.CreateUserRequest;
 import com.example.erp.dto.ForceLogoutRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.ResetPasswordRequest;
+import com.example.erp.dto.UpdateCustomRoleRequest;
 import com.example.erp.dto.UpdateRoleRequest;
 import com.example.erp.dto.UpdateStatusRequest;
 import com.example.erp.dto.UpdateUserRequest;
@@ -25,7 +26,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/admin/users")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
+@PreAuthorize("hasAnyRole('ADMIN','USER')")
 public class UserController {
 
     private final UserService userService;
@@ -58,6 +59,14 @@ public class UserController {
                                                                   Authentication authentication) {
         return ResponseEntity.ok(ApiResponse.success("Role updated",
                 userService.updateRole(id, request, requireUsername(authentication))));
+    }
+
+    @PutMapping("/{id}/custom-role")
+    public ResponseEntity<ApiResponse<UserResponse>> updateCustomRole(@PathVariable Long id,
+                                                                        @Valid @RequestBody UpdateCustomRoleRequest request,
+                                                                        Authentication authentication) {
+        return ResponseEntity.ok(ApiResponse.success("Custom role updated",
+                userService.updateCustomRole(id, request, requireUsername(authentication))));
     }
 
     @PutMapping("/{id}/status")

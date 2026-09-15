@@ -23,4 +23,8 @@ public class PostingRuleRequest {
     private Long taxReceivableAccountId;
     private Long defaultCashAccountId;
     private Long defaultBankAccountId;
+    private Long fixedAssetCostAccountId;
+    private Long depreciationExpenseAccountId;
+    private Long accumulatedDepreciationAccountId;
+    private Long assetDisposalGainLossAccountId;
 }

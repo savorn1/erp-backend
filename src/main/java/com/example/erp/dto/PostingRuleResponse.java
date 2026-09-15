@@ -35,4 +35,12 @@ public class PostingRuleResponse {
     private String defaultCashAccountLabel;
     private Long defaultBankAccountId;
     private String defaultBankAccountLabel;
+    private Long fixedAssetCostAccountId;
+    private String fixedAssetCostAccountLabel;
+    private Long depreciationExpenseAccountId;
+    private String depreciationExpenseAccountLabel;
+    private Long accumulatedDepreciationAccountId;
+    private String accumulatedDepreciationAccountLabel;
+    private Long assetDisposalGainLossAccountId;
+    private String assetDisposalGainLossAccountLabel;
 }

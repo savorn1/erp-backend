@@ -188,7 +188,7 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
             String productLabel = product == null ? "product id " + line.getProductId() : product.getName();
             ProductTrackingType trackingType = product == null || product.getTrackingType() == null
                     ? ProductTrackingType.NONE : product.getTrackingType();
-            boolean isIncrease = line.getReason() == StockAdjustmentReason.STOCK_INCREASE;
+            boolean isIncrease = isIncreaseReason(line.getReason());
 
             if (trackingType == ProductTrackingType.BATCH) {
                 ProductBatch batch = isIncrease
@@ -240,7 +240,7 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
         }
 
         for (StockAdjustmentLine line : lines) {
-            boolean isIncrease = line.getReason() == StockAdjustmentReason.STOCK_INCREASE;
+            boolean isIncrease = isIncreaseReason(line.getReason());
             BigDecimal signedDelta = isIncrease ? line.getQuantity() : line.getQuantity().negate();
             ProductBatch batch = resolvedBatchByLine.get(line.getId());
             if (batch != null) {
@@ -318,6 +318,10 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
         }
         stockAdjustmentLineRepository.deleteByStockAdjustmentId(id);
         stockAdjustmentRepository.deleteById(id);
+    }
+
+    private boolean isIncreaseReason(StockAdjustmentReason reason) {
+        return reason == StockAdjustmentReason.STOCK_INCREASE || reason == StockAdjustmentReason.OPENING_BALANCE;
     }
 
     private List<String> parseSerials(String raw) {

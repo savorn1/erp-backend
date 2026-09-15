@@ -62,6 +62,12 @@ public class User implements UserDetails {
     @Column(name = "branch_id")
     private Long branchId;
 
+    // Only consulted when role == USER — PermissionAuthorizationManager looks
+    // up this role's grants to decide access under /api/admin/**. ADMIN
+    // always bypasses this entirely, so it's null for every ADMIN account.
+    @Column(name = "custom_role_id")
+    private Long customRoleId;
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));

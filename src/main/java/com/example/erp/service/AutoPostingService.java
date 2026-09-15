@@ -1,6 +1,7 @@
 package com.example.erp.service;
 
 import com.example.erp.entity.CreditNote;
+import com.example.erp.entity.FixedAsset;
 import com.example.erp.entity.Invoice;
 import com.example.erp.entity.Payment;
 import com.example.erp.entity.PurchaseCreditNote;
@@ -8,6 +9,7 @@ import com.example.erp.entity.PurchaseInvoice;
 import com.example.erp.entity.SupplierPayment;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 // Auto-generates a balanced JournalEntry for a business event, using the
 // company's PostingRule account mapping. Every method is a no-op (returns
@@ -17,7 +19,7 @@ import java.math.BigDecimal;
 // (approving an invoice, recording a payment, etc. always succeeds on its
 // own terms regardless of GL setup). Call sites: InvoiceServiceImpl,
 // PurchaseInvoiceServiceImpl, PaymentServiceImpl, SupplierPaymentServiceImpl,
-// CreditNoteServiceImpl, PurchaseCreditNoteServiceImpl.
+// CreditNoteServiceImpl, PurchaseCreditNoteServiceImpl, FixedAssetServiceImpl.
 public interface AutoPostingService {
 
     // Dr Accounts Receivable (totalAmount) / Cr Sales Revenue (netAmount) /
@@ -41,6 +43,20 @@ public interface AutoPostingService {
 
     // Dr Accounts Payable / Cr Purchase Returns.
     void postPurchaseCreditNote(PurchaseCreditNote creditNote, String actingUsername);
+
+    // Dr Fixed Assets, at cost (acquisitionCost) / Cr Accounts Payable —
+    // posted once, when the asset is created.
+    void postFixedAssetAcquisition(FixedAsset asset, String actingUsername);
+
+    // Dr Depreciation Expense / Cr Accumulated Depreciation — one combined
+    // entry per depreciation run, summed across every asset it covered.
+    void postDepreciationRun(Long companyId, LocalDate date, BigDecimal totalAmount, Long sourceId, String actingUsername);
+
+    // Dr Cash/Bank (proceeds) + Dr Accumulated Depreciation (this asset's
+    // balance, cleared) / Cr Fixed Assets, at cost (acquisitionCost) + the
+    // gain or loss (proceeds vs. book value) plugged into
+    // assetDisposalGainLossAccountId on whichever side balances the entry.
+    void postAssetDisposal(FixedAsset asset, BigDecimal proceeds, String actingUsername);
 
     // Finds the auto-posted entry (if any) for this source and reverses it —
     // a POSTED entry gets a swapped-lines reversal (same as

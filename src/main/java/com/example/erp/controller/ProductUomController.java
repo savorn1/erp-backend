@@ -20,7 +20,7 @@ import java.util.List;
 // yet — that integration is a deliberate later phase.
 @RestController
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
+@PreAuthorize("hasAnyRole('ADMIN','USER')")
 public class ProductUomController {
 
     private final ProductUomService productUomService;

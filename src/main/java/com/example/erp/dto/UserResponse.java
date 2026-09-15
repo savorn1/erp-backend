@@ -22,4 +22,6 @@ public class UserResponse {
     private String branchName;
     private Long departmentId;
     private String departmentName;
+    private Long customRoleId;
+    private String customRoleName;
 }

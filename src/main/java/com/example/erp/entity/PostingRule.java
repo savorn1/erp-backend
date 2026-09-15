@@ -74,4 +74,19 @@ public class PostingRule {
     // Used for BANK_TRANSFER / PAYMENT_GATEWAY methods.
     @Column(name = "default_bank_account_id")
     private Long defaultBankAccountId;
+
+    // Shared "Fixed Assets, at cost" account — every FixedAsset's
+    // acquisition and disposal posts against this same account (the
+    // FixedAsset table itself is the per-asset sub-ledger).
+    @Column(name = "fixed_asset_cost_account_id")
+    private Long fixedAssetCostAccountId;
+
+    @Column(name = "depreciation_expense_account_id")
+    private Long depreciationExpenseAccountId;
+
+    @Column(name = "accumulated_depreciation_account_id")
+    private Long accumulatedDepreciationAccountId;
+
+    @Column(name = "asset_disposal_gain_loss_account_id")
+    private Long assetDisposalGainLossAccountId;
 }
