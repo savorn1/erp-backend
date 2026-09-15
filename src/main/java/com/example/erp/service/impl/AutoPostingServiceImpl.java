@@ -237,6 +237,44 @@ public class AutoPostingServiceImpl implements AutoPostingService {
         createAutoEntry(companyId, date, "Cash variance", "POS_CASH_VARIANCE", sourceId, actingUsername, lines);
     }
 
+    @Override
+    @Transactional
+    public void postPosExchange(Long companyId, LocalDate date, BigDecimal netRevenue, BigDecimal netTax, BigDecimal netCogs,
+                                 BigDecimal cashAmount, BigDecimal bankAmount, Long sourceId, String actingUsername) {
+        PostingRule rule = postingRuleRepository.findByCompanyId(companyId).orElse(null);
+        if (rule == null) return;
+
+        List<Line> lines = new ArrayList<>();
+        if (cashAmount.signum() > 0) {
+            lines.add(new Line(rule.getDefaultCashAccountId(), cashAmount, BigDecimal.ZERO));
+        } else if (cashAmount.signum() < 0) {
+            lines.add(new Line(rule.getDefaultCashAccountId(), BigDecimal.ZERO, cashAmount.negate()));
+        }
+        if (bankAmount.signum() > 0) {
+            lines.add(new Line(rule.getDefaultBankAccountId(), bankAmount, BigDecimal.ZERO));
+        } else if (bankAmount.signum() < 0) {
+            lines.add(new Line(rule.getDefaultBankAccountId(), BigDecimal.ZERO, bankAmount.negate()));
+        }
+        if (netRevenue.signum() > 0) {
+            lines.add(new Line(rule.getSalesRevenueAccountId(), BigDecimal.ZERO, netRevenue));
+        } else if (netRevenue.signum() < 0) {
+            lines.add(new Line(rule.getSalesRevenueAccountId(), netRevenue.negate(), BigDecimal.ZERO));
+        }
+        if (netTax.signum() > 0) {
+            lines.add(new Line(rule.getTaxPayableAccountId(), BigDecimal.ZERO, netTax));
+        } else if (netTax.signum() < 0) {
+            lines.add(new Line(rule.getTaxPayableAccountId(), netTax.negate(), BigDecimal.ZERO));
+        }
+        if (netCogs.signum() > 0) {
+            lines.add(new Line(rule.getPurchaseExpenseAccountId(), netCogs, BigDecimal.ZERO));
+            lines.add(new Line(rule.getInventoryAssetAccountId(), BigDecimal.ZERO, netCogs));
+        } else if (netCogs.signum() < 0) {
+            lines.add(new Line(rule.getInventoryAssetAccountId(), netCogs.negate(), BigDecimal.ZERO));
+            lines.add(new Line(rule.getPurchaseExpenseAccountId(), BigDecimal.ZERO, netCogs.negate()));
+        }
+        createAutoEntry(companyId, date, "POS exchange", "POS_EXCHANGE", sourceId, actingUsername, lines);
+    }
+
     private Long cashOrBankAccountId(PostingRule rule, PaymentMethod method) {
         return method == PaymentMethod.CASH ? rule.getDefaultCashAccountId() : rule.getDefaultBankAccountId();
     }

@@ -74,6 +74,17 @@ public interface AutoPostingService {
     // cashVarianceAccountId / Cr Cash. A zero variance posts nothing.
     void postCashVariance(Long companyId, LocalDate date, BigDecimal variance, Long sourceId, String actingUsername);
 
+    // One netted, sign-aware entry per POS exchange — netRevenue/netTax/
+    // netCogs are each (new items total) minus (returned items total), and
+    // cashAmount/bankAmount are the signed settlement (positive = customer
+    // paid in, negative = store paid out), placed on whichever the
+    // exchange's settlementMethod bucketed to. Each leg posts to whichever
+    // side its sign implies (e.g. netRevenue > 0 -> Cr Sales Revenue;
+    // netRevenue < 0 -> Dr Sales Revenue, revenue given back). A leg that is
+    // exactly zero is omitted entirely, same as postPosSale.
+    void postPosExchange(Long companyId, LocalDate date, BigDecimal netRevenue, BigDecimal netTax, BigDecimal netCogs,
+                          BigDecimal cashAmount, BigDecimal bankAmount, Long sourceId, String actingUsername);
+
     // Finds the auto-posted entry (if any) for this source and reverses it —
     // a POSTED entry gets a swapped-lines reversal (same as
     // JournalEntryServiceImpl.reverse), a DRAFT one (created while its

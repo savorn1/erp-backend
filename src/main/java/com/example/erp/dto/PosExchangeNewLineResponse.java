@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PosSaleLineResponse {
+public class PosExchangeNewLineResponse {
 
     private Long id;
     private Long productId;
@@ -22,5 +22,4 @@ public class PosSaleLineResponse {
     private BigDecimal discountPercent;
     private BigDecimal taxRate;
     private BigDecimal lineTotal;
-    private BigDecimal returnedQuantity;
 }

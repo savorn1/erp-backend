@@ -14,24 +14,25 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 
-// taxRate is a raw percent snapshot copied from Product.taxRate at
-// add-to-cart time — same convention as SalesOrderLine/InvoiceLine, not a
-// TaxRate FK (see TaxRate.java's own comment on why lines don't reference it).
+// One new item taken instead, priced at today's product price the same way
+// a PosSaleLine is (see PosPricingService) — net/tax/costPrice are kept
+// alongside lineTotal so PosExchangeServiceImpl can total and post without
+// re-deriving them from productId + quantity later.
 @Entity
-@Table(name = "pos_sale_lines")
+@Table(name = "pos_exchange_new_lines")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class PosSaleLine {
+public class PosExchangeNewLine {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "pos_sale_id", nullable = false)
-    private Long posSaleId;
+    @Column(name = "pos_exchange_id", nullable = false)
+    private Long posExchangeId;
 
     @Column(name = "product_id", nullable = false)
     private Long productId;
@@ -50,13 +51,15 @@ public class PosSaleLine {
     @Builder.Default
     private BigDecimal taxRate = BigDecimal.ZERO;
 
+    @Column(nullable = false, precision = 19, scale = 4)
+    private BigDecimal net;
+
+    @Column(nullable = false, precision = 19, scale = 4)
+    private BigDecimal tax;
+
     @Column(name = "line_total", nullable = false, precision = 19, scale = 4)
     private BigDecimal lineTotal;
 
-    // Running total returned against this line across every PosExchange that
-    // has touched it — a return request is rejected once quantity minus this
-    // can't cover the requested amount (see PosExchangeServiceImpl).
-    @Column(name = "returned_quantity", nullable = false, precision = 19, scale = 4)
-    @Builder.Default
-    private BigDecimal returnedQuantity = BigDecimal.ZERO;
+    @Column(name = "cost_price", nullable = false, precision = 19, scale = 4)
+    private BigDecimal costPrice;
 }

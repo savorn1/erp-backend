@@ -19,9 +19,6 @@ import com.example.erp.entity.PosSession;
 import com.example.erp.entity.PosSessionStatus;
 import com.example.erp.entity.Product;
 import com.example.erp.entity.Register;
-import com.example.erp.entity.StockLevel;
-import com.example.erp.entity.StockMovement;
-import com.example.erp.entity.StockMovementType;
 import com.example.erp.entity.Warehouse;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.CustomerRepository;
@@ -31,11 +28,10 @@ import com.example.erp.repository.PosSaleRepository;
 import com.example.erp.repository.PosSessionRepository;
 import com.example.erp.repository.ProductRepository;
 import com.example.erp.repository.RegisterRepository;
-import com.example.erp.repository.StockLevelRepository;
-import com.example.erp.repository.StockMovementRepository;
 import com.example.erp.repository.WarehouseRepository;
 import com.example.erp.service.AutoPostingService;
 import com.example.erp.service.PosSaleService;
+import com.example.erp.service.impl.PosPricingService.PricedLine;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -46,10 +42,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -67,10 +61,10 @@ public class PosSaleServiceImpl implements PosSaleService {
     private final RegisterRepository registerRepository;
     private final CustomerRepository customerRepository;
     private final ProductRepository productRepository;
-    private final StockLevelRepository stockLevelRepository;
-    private final StockMovementRepository stockMovementRepository;
     private final WarehouseRepository warehouseRepository;
     private final AutoPostingService autoPostingService;
+    private final PosPricingService posPricingService;
+    private final PosStockService posStockService;
 
     @Override
     @Transactional(readOnly = true)
@@ -84,6 +78,14 @@ public class PosSaleServiceImpl implements PosSaleService {
         if (filter.getPosSessionId() != null) conditions.add((root, query, cb) -> cb.equal(root.get("posSessionId"), filter.getPosSessionId()));
         if (filter.getStatus() != null && !filter.getStatus().isBlank()) {
             conditions.add((root, query, cb) -> cb.equal(root.get("status"), PosSaleStatus.valueOf(filter.getStatus())));
+        }
+        if (filter.getDateFrom() != null) {
+            LocalDateTime from = filter.getDateFrom().atStartOfDay();
+            conditions.add((root, query, cb) -> cb.greaterThanOrEqualTo(root.get("saleDate"), from));
+        }
+        if (filter.getDateTo() != null) {
+            LocalDateTime to = filter.getDateTo().atTime(23, 59, 59);
+            conditions.add((root, query, cb) -> cb.lessThanOrEqualTo(root.get("saleDate"), to));
         }
         Specification<PosSale> spec = Specification.allOf(conditions);
         Pageable pageable = PageableUtils.of(filter.getPage(), filter.getSize(), filter.getSortBy(), filter.getSortOrder());
@@ -112,9 +114,6 @@ public class PosSaleServiceImpl implements PosSaleService {
         Long customerId = resolveCustomer(register.getCompanyId(), request.getCustomerId());
 
         // ── Price/tax the lines ─────────────────────────────────────────────
-        record PricedLine(Long productId, BigDecimal quantity, BigDecimal unitPrice, BigDecimal discountPercent,
-                           BigDecimal taxRate, BigDecimal net, BigDecimal tax, BigDecimal lineTotal, BigDecimal costPrice) {}
-
         List<PricedLine> pricedLines = new ArrayList<>();
         for (PosCheckoutLineRequest lineRequest : request.getLines()) {
             Product product = productRepository.findById(lineRequest.getProductId())
@@ -122,14 +121,7 @@ public class PosSaleServiceImpl implements PosSaleService {
             if (!product.getCompanyId().equals(register.getCompanyId())) {
                 throw new AppException(HttpStatus.BAD_REQUEST, "Product does not belong to this register's company: " + product.getName());
             }
-            BigDecimal discountPercent = lineRequest.getDiscountPercent() == null ? BigDecimal.ZERO : lineRequest.getDiscountPercent();
-            BigDecimal gross = lineRequest.getQuantity().multiply(product.getSellingPrice());
-            BigDecimal discount = gross.multiply(discountPercent).divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
-            BigDecimal net = gross.subtract(discount);
-            BigDecimal tax = net.multiply(product.getTaxRate()).divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
-            BigDecimal lineTotal = net.add(tax);
-            pricedLines.add(new PricedLine(product.getId(), lineRequest.getQuantity(), product.getSellingPrice(), discountPercent,
-                    product.getTaxRate(), net, tax, lineTotal, product.getCostPrice()));
+            pricedLines.add(posPricingService.price(product, lineRequest.getQuantity(), lineRequest.getDiscountPercent()));
         }
 
         BigDecimal subtotal = pricedLines.stream().map(l -> l.quantity().multiply(l.unitPrice())).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -188,7 +180,8 @@ public class PosSaleServiceImpl implements PosSaleService {
                     .taxRate(line.taxRate())
                     .lineTotal(line.lineTotal())
                     .build());
-            decreaseStockForSale(register.getCompanyId(), register.getWarehouseId(), line.productId(), line.quantity(), sale.getId(), actingUsername);
+            posStockService.decrease(register.getCompanyId(), register.getWarehouseId(), line.productId(), line.quantity(),
+                    "POS_SALE", sale.getId(), actingUsername);
         }
 
         // ── Tender lines (non-cash as requested, one applied-cash line) ─────
@@ -228,7 +221,8 @@ public class PosSaleServiceImpl implements PosSaleService {
         }
         List<PosSaleLine> lines = posSaleLineRepository.findByPosSaleId(id);
         for (PosSaleLine line : lines) {
-            increaseStockForVoid(sale.getCompanyId(), sale.getWarehouseId(), line.getProductId(), line.getQuantity(), sale.getId(), actingUsername);
+            posStockService.increase(sale.getCompanyId(), sale.getWarehouseId(), line.getProductId(), line.getQuantity(),
+                    "POS_SALE_VOID", sale.getId(), actingUsername);
         }
         autoPostingService.reverseAutoEntry("POS_SALE", sale.getId(), actingUsername);
 
@@ -255,62 +249,6 @@ public class PosSaleServiceImpl implements PosSaleService {
                         .name(WALK_IN_CUSTOMER_NAME)
                         .build()))
                 .getId();
-    }
-
-    // Locked, largest-bin-first drain — same algorithm as
-    // StockTransferServiceImpl/StockAdjustmentServiceImpl/DeliveryServiceImpl,
-    // but sourced via the pessimistic-write query since POS checkout is the
-    // one flow where two actors can race on the same row.
-    private void decreaseStockForSale(Long companyId, Long warehouseId, Long productId, BigDecimal quantity, Long saleId, String actingUsername) {
-        List<StockLevel> stockLevels = stockLevelRepository.findByProductIdAndWarehouseIdForUpdate(productId, warehouseId).stream()
-                .sorted(Comparator.comparing(StockLevel::getQuantityOnHand).reversed())
-                .toList();
-        BigDecimal remaining = quantity;
-        for (StockLevel stockLevel : stockLevels) {
-            if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
-            BigDecimal take = stockLevel.getQuantityOnHand().min(remaining);
-            stockLevel.setQuantityOnHand(stockLevel.getQuantityOnHand().subtract(take));
-            stockLevelRepository.save(stockLevel);
-            remaining = remaining.subtract(take);
-        }
-        if (remaining.compareTo(BigDecimal.ZERO) > 0) {
-            throw new AppException(HttpStatus.BAD_REQUEST, "Insufficient stock for product id " + productId);
-        }
-        stockMovementRepository.save(StockMovement.builder()
-                .companyId(companyId)
-                .productId(productId)
-                .warehouseId(warehouseId)
-                .type(StockMovementType.ISSUE)
-                .quantityDelta(quantity.negate())
-                .referenceType("POS_SALE")
-                .referenceId(saleId)
-                .createdBy(actingUsername)
-                .build());
-    }
-
-    // Void restores quantity onto the unbinned row (find-or-create) rather
-    // than trying to restore exact bin provenance — same simplification
-    // every other increase-side helper in this codebase already makes.
-    private void increaseStockForVoid(Long companyId, Long warehouseId, Long productId, BigDecimal quantity, Long saleId, String actingUsername) {
-        StockLevel stockLevel = stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(productId, warehouseId)
-                .orElseGet(() -> StockLevel.builder()
-                        .companyId(companyId)
-                        .productId(productId)
-                        .warehouseId(warehouseId)
-                        .build());
-        stockLevel.setQuantityOnHand(stockLevel.getQuantityOnHand().add(quantity));
-        stockLevelRepository.save(stockLevel);
-
-        stockMovementRepository.save(StockMovement.builder()
-                .companyId(companyId)
-                .productId(productId)
-                .warehouseId(warehouseId)
-                .type(StockMovementType.ISSUE)
-                .quantityDelta(quantity)
-                .referenceType("POS_SALE_VOID")
-                .referenceId(saleId)
-                .createdBy(actingUsername)
-                .build());
     }
 
     private PosSaleResponse toResponse(PosSale sale, List<PosSaleLine> lines) {
@@ -342,6 +280,7 @@ public class PosSaleServiceImpl implements PosSaleService {
                             .discountPercent(line.getDiscountPercent())
                             .taxRate(line.getTaxRate())
                             .lineTotal(line.getLineTotal())
+                            .returnedQuantity(line.getReturnedQuantity())
                             .build();
                 })
                 .toList();

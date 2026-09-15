@@ -11,9 +11,10 @@ import java.math.BigDecimal;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PosSaleLineResponse {
+public class PosExchangeReturnLineResponse {
 
     private Long id;
+    private Long originalPosSaleLineId;
     private Long productId;
     private String productName;
     private String productSku;
@@ -21,6 +22,5 @@ public class PosSaleLineResponse {
     private BigDecimal unitPrice;
     private BigDecimal discountPercent;
     private BigDecimal taxRate;
-    private BigDecimal lineTotal;
-    private BigDecimal returnedQuantity;
+    private BigDecimal lineValue;
 }

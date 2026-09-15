@@ -11,16 +11,13 @@ import java.math.BigDecimal;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PosSaleLineResponse {
+public class PosHeldSaleLineResponse {
 
     private Long id;
     private Long productId;
     private String productName;
     private String productSku;
+    private String imageUrl;
     private BigDecimal quantity;
-    private BigDecimal unitPrice;
     private BigDecimal discountPercent;
-    private BigDecimal taxRate;
-    private BigDecimal lineTotal;
-    private BigDecimal returnedQuantity;
 }
