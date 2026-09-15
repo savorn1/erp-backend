@@ -14,7 +14,9 @@ import com.example.erp.dto.UserResponse;
 import com.example.erp.entity.Branch;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.Department;
+import com.example.erp.dto.PermissionGrant;
 import com.example.erp.entity.CustomRole;
+import com.example.erp.entity.Role;
 import com.example.erp.entity.User;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.BranchRepository;
@@ -22,6 +24,7 @@ import com.example.erp.repository.CompanyRepository;
 import com.example.erp.repository.CustomRoleRepository;
 import com.example.erp.repository.DepartmentRepository;
 import com.example.erp.repository.RefreshTokenRepository;
+import com.example.erp.repository.RolePermissionRepository;
 import com.example.erp.repository.UserRepository;
 import com.example.erp.service.UserService;
 import com.example.erp.util.PageableUtils;
@@ -51,6 +54,7 @@ public class UserServiceImpl implements UserService {
     private final CompanyRepository companyRepository;
     private final BranchRepository branchRepository;
     private final CustomRoleRepository customRoleRepository;
+    private final RolePermissionRepository rolePermissionRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -316,8 +320,21 @@ public class UserServiceImpl implements UserService {
     }
 
     private UserResponse toResponse(User user) {
-        return toResponse(user, companyNameOf(user.getCompanyId()), branchNameOf(user.getBranchId()), departmentNameOf(user.getDepartmentId()),
+        UserResponse response = toResponse(user, companyNameOf(user.getCompanyId()), branchNameOf(user.getBranchId()), departmentNameOf(user.getDepartmentId()),
                 customRoleNameOf(user.getCustomRoleId()));
+        response.setPermissions(effectivePermissionsOf(user));
+        return response;
+    }
+
+    // ADMIN always has full access (see PermissionAuthorizationManager) and
+    // never needs a resolved grant list; a USER with no custom role has none.
+    private List<PermissionGrant> effectivePermissionsOf(User user) {
+        if (user.getRole() != Role.USER || user.getCustomRoleId() == null) {
+            return List.of();
+        }
+        return rolePermissionRepository.findByCustomRoleId(user.getCustomRoleId()).stream()
+                .map(p -> new PermissionGrant(p.getModule(), p.getAction()))
+                .toList();
     }
 
     private UserResponse toResponse(User user, String companyName, String branchName, String departmentName, String customRoleName) {
