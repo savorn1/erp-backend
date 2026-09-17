@@ -9,6 +9,7 @@ import com.example.erp.dto.PageResponse;
 import com.example.erp.entity.Delivery;
 import com.example.erp.entity.DeliveryLine;
 import com.example.erp.entity.DeliveryStatus;
+import com.example.erp.entity.InventorySettings;
 import com.example.erp.entity.Product;
 import com.example.erp.entity.ProductBatch;
 import com.example.erp.entity.ProductTrackingType;
@@ -37,6 +38,7 @@ import com.example.erp.repository.WarehouseBinRepository;
 import com.example.erp.repository.WarehouseRepository;
 import com.example.erp.repository.WarehouseZoneRepository;
 import com.example.erp.service.DeliveryService;
+import com.example.erp.service.InventorySettingsService;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -75,6 +77,7 @@ public class DeliveryServiceImpl implements DeliveryService {
     private final ProductRepository productRepository;
     private final ProductBatchRepository productBatchRepository;
     private final SerialNumberRepository serialNumberRepository;
+    private final InventorySettingsService inventorySettingsService;
 
     @Override
     @Transactional(readOnly = true)
@@ -257,6 +260,7 @@ public class DeliveryServiceImpl implements DeliveryService {
         List<DeliveryLine> lines = deliveryLineRepository.findByDeliveryId(id);
         Map<Long, SalesOrderLine> soLines = salesOrderLineRepository.findBySalesOrderId(so.getId()).stream()
                 .collect(Collectors.toMap(SalesOrderLine::getId, l -> l));
+        InventorySettings settings = inventorySettingsService.resolveForCompany(so.getCompanyId());
 
         // ── Stock validation ────────────────────────────────────────────────
         // Every line is resolved and checked before anything is written — the
@@ -279,7 +283,7 @@ public class DeliveryServiceImpl implements DeliveryService {
             }
 
             BigDecimal available = availableQuantity(line.getProductId(), so.getWarehouseId(), line.getBinId());
-            if (line.getQuantityDelivered().compareTo(available) > 0) {
+            if (line.getQuantityDelivered().compareTo(available) > 0 && !settings.isAllowNegativeStock()) {
                 throw new AppException(HttpStatus.BAD_REQUEST,
                         "Insufficient stock on hand (" + available + ") for " + productLabel);
             }
@@ -324,7 +328,10 @@ public class DeliveryServiceImpl implements DeliveryService {
             soLine.setQuantityDelivered(soLine.getQuantityDelivered().add(line.getQuantityDelivered()));
             salesOrderLineRepository.save(soLine);
 
-            decreaseStock(line.getProductId(), so.getWarehouseId(), line.getBinId(), line.getQuantityDelivered());
+            decreaseStock(so.getCompanyId(), line.getProductId(), so.getWarehouseId(), line.getBinId(), line.getQuantityDelivered(), settings.isAllowNegativeStock());
+            if (settings.isReserveStock()) {
+                releaseReservation(line.getProductId(), so.getCompanyId(), so.getWarehouseId(), line.getQuantityDelivered());
+            }
             stockMovementRepository.save(StockMovement.builder()
                     .companyId(so.getCompanyId())
                     .productId(line.getProductId())
@@ -403,13 +410,16 @@ public class DeliveryServiceImpl implements DeliveryService {
 
     // Mirrors availableQuantity's "no specific bin" semantics: pulls from
     // whichever bin(s) actually hold the stock, largest first, until the
-    // requested quantity is satisfied.
-    private void decreaseStock(Long productId, Long warehouseId, Long binId, BigDecimal quantity) {
+    // requested quantity is satisfied. allowNegativeStock (from
+    // InventorySettings) lets the final shortfall push the targeted row
+    // below zero instead of throwing — the pre-check in shipDelivery has
+    // already decided whether that's permitted.
+    private void decreaseStock(Long companyId, Long productId, Long warehouseId, Long binId, BigDecimal quantity, boolean allowNegativeStock) {
         if (binId != null) {
             StockLevel stockLevel = stockLevelRepository.findByProductIdAndWarehouseIdAndBinId(productId, warehouseId, binId)
                     .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "No stock on hand for this product at the source location"));
             BigDecimal updated = stockLevel.getQuantityOnHand().subtract(quantity);
-            if (updated.compareTo(BigDecimal.ZERO) < 0) {
+            if (updated.compareTo(BigDecimal.ZERO) < 0 && !allowNegativeStock) {
                 throw new AppException(HttpStatus.BAD_REQUEST, "Insufficient stock on hand for this product at the source location");
             }
             stockLevel.setQuantityOnHand(updated);
@@ -429,8 +439,34 @@ public class DeliveryServiceImpl implements DeliveryService {
             remaining = remaining.subtract(take);
         }
         if (remaining.compareTo(BigDecimal.ZERO) > 0) {
-            throw new AppException(HttpStatus.BAD_REQUEST, "Insufficient stock on hand for this product at the source location");
+            if (!allowNegativeStock) {
+                throw new AppException(HttpStatus.BAD_REQUEST, "Insufficient stock on hand for this product at the source location");
+            }
+            StockLevel unbinned = stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(productId, warehouseId)
+                    .orElseGet(() -> StockLevel.builder()
+                            .companyId(companyId)
+                            .productId(productId)
+                            .warehouseId(warehouseId)
+                            .build());
+            unbinned.setQuantityOnHand(unbinned.getQuantityOnHand().subtract(remaining));
+            stockLevelRepository.save(unbinned);
         }
+    }
+
+    // Releases (or, if reserveStock was toggled on after some already-shipped
+    // deliveries, no-ops harmlessly at zero) the portion of a reservation
+    // this delivery just fulfilled — see SalesOrderServiceImpl's own
+    // reserve/release for the same unbinned-row convention.
+    private void releaseReservation(Long productId, Long companyId, Long warehouseId, BigDecimal quantity) {
+        StockLevel unbinned = stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(productId, warehouseId)
+                .orElseGet(() -> StockLevel.builder()
+                        .companyId(companyId)
+                        .productId(productId)
+                        .warehouseId(warehouseId)
+                        .build());
+        BigDecimal updated = unbinned.getReservedQuantity().subtract(quantity);
+        unbinned.setReservedQuantity(updated.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : updated);
+        stockLevelRepository.save(unbinned);
     }
 
     private void requireBinInWarehouse(Long binId, Long warehouseId) {

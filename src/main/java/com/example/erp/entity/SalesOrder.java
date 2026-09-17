@@ -14,6 +14,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 // Line items live in the separate SalesOrderLine entity/table, looked up by
@@ -58,4 +59,18 @@ public class SalesOrder {
     private String notes;
 
     private String createdBy;
+
+    // Reference-only foreign currency, for display/printing — null means
+    // "base currency only," the default and only option before this field
+    // existed. Never consulted by AutoPostingService/GL/payments: the amounts
+    // above (subtotal/discountAmount/taxAmount/totalAmount, computed by
+    // SalesOrderServiceImpl) always stay in the company's base currency.
+    @Column(name = "foreign_currency", length = 3)
+    private String foreignCurrency;
+
+    // 1 foreignCurrency unit = exchangeRate base-currency units. Required
+    // together with foreignCurrency — both null or both set, enforced in
+    // SalesOrderServiceImpl.
+    @Column(name = "exchange_rate", precision = 19, scale = 6)
+    private BigDecimal exchangeRate;
 }

@@ -32,5 +32,10 @@ public class SalesOrderResponse {
     private BigDecimal discountAmount;
     private BigDecimal taxAmount;
     private BigDecimal totalAmount;
+    private String foreignCurrency;
+    private BigDecimal exchangeRate;
+    // totalAmount / exchangeRate, only when both foreignCurrency and
+    // exchangeRate are set — a display-only convenience, never stored.
+    private BigDecimal foreignTotalAmount;
     private List<SalesOrderLineResponse> lines;
 }

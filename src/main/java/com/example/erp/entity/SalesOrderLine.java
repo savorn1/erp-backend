@@ -55,4 +55,15 @@ public class SalesOrderLine {
     @Column(nullable = false, precision = 19, scale = 4)
     @Builder.Default
     private BigDecimal quantityDelivered = BigDecimal.ZERO;
+
+    // Portion of quantityOrdered that exceeded on-hand at confirmation and
+    // was let through anyway under InventorySettings.backorderEnabled — 0
+    // otherwise. Set once at approveSalesOrder, never adjusted afterward
+    // (quantityOrdered itself is locked post-confirmation). columnDefinition
+    // carries an explicit SQL default — see StockLevel.reservedQuantity for
+    // why (this table already has rows).
+    @Column(name = "backordered_quantity", nullable = false, precision = 19, scale = 4,
+            columnDefinition = "numeric(19,4) not null default 0")
+    @Builder.Default
+    private BigDecimal backorderedQuantity = BigDecimal.ZERO;
 }

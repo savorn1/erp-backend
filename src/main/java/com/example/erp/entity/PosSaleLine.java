@@ -56,7 +56,19 @@ public class PosSaleLine {
     // Running total returned against this line across every PosExchange that
     // has touched it — a return request is rejected once quantity minus this
     // can't cover the requested amount (see PosExchangeServiceImpl).
-    @Column(name = "returned_quantity", nullable = false, precision = 19, scale = 4)
+    // columnDefinition carries an explicit SQL default: added after this
+    // table already had rows, and ddl-auto=update's "add column ... not
+    // null" (with no default) fails against Postgres once any row exists.
+    @Column(name = "returned_quantity", nullable = false, precision = 19, scale = 4,
+            columnDefinition = "numeric(19,4) not null default 0")
     @Builder.Default
     private BigDecimal returnedQuantity = BigDecimal.ZERO;
+
+    // Portion of `quantity` that exceeded on-hand at checkout and was let
+    // through anyway under InventorySettings.backorderEnabled — 0 otherwise.
+    // See PosStockService.decrease's return value and StockAvailabilityService.
+    @Column(name = "backordered_quantity", nullable = false, precision = 19, scale = 4,
+            columnDefinition = "numeric(19,4) not null default 0")
+    @Builder.Default
+    private BigDecimal backorderedQuantity = BigDecimal.ZERO;
 }

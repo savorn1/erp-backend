@@ -14,6 +14,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 // Generated either from a SalesOrder (bills the full ordered quantity — an
@@ -64,4 +65,13 @@ public class Invoice {
     private String notes;
 
     private String createdBy;
+
+    // Reference-only foreign currency, for display/printing — see
+    // SalesOrder's own comment. Never consulted by AutoPostingService/GL/
+    // payments: totalAmount always stays in the company's base currency.
+    @Column(name = "foreign_currency", length = 3)
+    private String foreignCurrency;
+
+    @Column(name = "exchange_rate", precision = 19, scale = 6)
+    private BigDecimal exchangeRate;
 }

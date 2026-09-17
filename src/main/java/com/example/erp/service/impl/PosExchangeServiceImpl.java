@@ -191,7 +191,7 @@ public class PosExchangeServiceImpl implements PosExchangeService {
             }
             PricedLine priced = posPricingService.price(product, lineRequest.getQuantity(), lineRequest.getDiscountPercent());
 
-            newLines.add(posExchangeNewLineRepository.save(PosExchangeNewLine.builder()
+            PosExchangeNewLine savedNewLine = posExchangeNewLineRepository.save(PosExchangeNewLine.builder()
                     .posExchangeId(exchange.getId())
                     .productId(priced.productId())
                     .quantity(priced.quantity())
@@ -202,10 +202,15 @@ public class PosExchangeServiceImpl implements PosExchangeService {
                     .tax(priced.tax())
                     .lineTotal(priced.lineTotal())
                     .costPrice(priced.costPrice())
-                    .build()));
+                    .build());
+            newLines.add(savedNewLine);
 
-            posStockService.decrease(register.getCompanyId(), register.getWarehouseId(), priced.productId(), priced.quantity(),
+            BigDecimal backordered = posStockService.decrease(register.getCompanyId(), register.getWarehouseId(), priced.productId(), priced.quantity(),
                     "POS_EXCHANGE_NEW", exchange.getId(), actingUsername);
+            if (backordered.signum() > 0) {
+                savedNewLine.setBackorderedQuantity(backordered);
+                posExchangeNewLineRepository.save(savedNewLine);
+            }
 
             newValue = newValue.add(priced.net());
             newTaxValue = newTaxValue.add(priced.tax());

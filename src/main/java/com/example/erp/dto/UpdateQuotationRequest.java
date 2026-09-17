@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -19,6 +20,9 @@ public class UpdateQuotationRequest {
     private LocalDate validUntil;
 
     private String notes;
+
+    private String foreignCurrency;
+    private BigDecimal exchangeRate;
 
     @NotEmpty
     @Valid

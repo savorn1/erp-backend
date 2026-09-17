@@ -1,6 +1,9 @@
 package com.example.erp.service.impl;
 
 import com.example.erp.dto.CreatePurchaseRequestRequest;
+import com.example.erp.dto.GenerateFromLowStockRequest;
+import com.example.erp.dto.InventoryOverviewFilterRequest;
+import com.example.erp.dto.InventoryOverviewResponse;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.PurchaseRequestFilterRequest;
 import com.example.erp.dto.PurchaseRequestLineRequest;
@@ -13,6 +16,7 @@ import com.example.erp.entity.Department;
 import com.example.erp.entity.Product;
 import com.example.erp.entity.PurchaseRequest;
 import com.example.erp.entity.PurchaseRequestLine;
+import com.example.erp.entity.PurchaseRequestSource;
 import com.example.erp.entity.PurchaseRequestStatus;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.CompanyRepository;
@@ -20,6 +24,7 @@ import com.example.erp.repository.DepartmentRepository;
 import com.example.erp.repository.ProductRepository;
 import com.example.erp.repository.PurchaseRequestLineRepository;
 import com.example.erp.repository.PurchaseRequestRepository;
+import com.example.erp.service.InventoryReportService;
 import com.example.erp.service.PurchaseRequestService;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
@@ -30,7 +35,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -44,6 +51,9 @@ public class PurchaseRequestServiceImpl implements PurchaseRequestService {
     private final CompanyRepository companyRepository;
     private final DepartmentRepository departmentRepository;
     private final ProductRepository productRepository;
+    private final InventoryReportService inventoryReportService;
+
+    private static final BigDecimal TWO = BigDecimal.valueOf(2);
 
     @Override
     @Transactional(readOnly = true)
@@ -108,6 +118,64 @@ public class PurchaseRequestServiceImpl implements PurchaseRequestService {
         purchaseRequestRepository.save(pr);
 
         List<PurchaseRequestLine> lines = saveLines(pr.getId(), request.getLines());
+        return toFullResponse(pr, lines);
+    }
+
+    @Override
+    @Transactional
+    public PurchaseRequestResponse generateFromLowStock(GenerateFromLowStockRequest request, String actingUsername) {
+        requireCompany(request.getCompanyId());
+        requireDepartment(request.getDepartmentId());
+
+        InventoryOverviewFilterRequest filter = new InventoryOverviewFilterRequest();
+        filter.setCompanyId(request.getCompanyId());
+        filter.setWarehouseId(request.getWarehouseId());
+        List<InventoryOverviewResponse> lowRows = inventoryReportService.lowStock(filter).getRows();
+        if (request.getProductIds() != null && !request.getProductIds().isEmpty()) {
+            lowRows = lowRows.stream().filter(row -> request.getProductIds().contains(row.getProductId())).toList();
+        }
+
+        // Rows are per-warehouse but a PurchaseRequestLine isn't — sum the
+        // shortfall across every warehouse a product is low in into one line.
+        Map<Long, BigDecimal> availableByProduct = new LinkedHashMap<>();
+        for (InventoryOverviewResponse row : lowRows) {
+            availableByProduct.merge(row.getProductId(), row.getAvailableStock(), BigDecimal::add);
+        }
+
+        Map<Long, Product> products = productRepository.findAllById(availableByProduct.keySet()).stream()
+                .collect(Collectors.toMap(Product::getId, p -> p));
+
+        List<PurchaseRequestLineRequest> lineRequests = new ArrayList<>();
+        for (Map.Entry<Long, BigDecimal> entry : availableByProduct.entrySet()) {
+            Product product = products.get(entry.getKey());
+            if (product == null) continue;
+            BigDecimal available = entry.getValue();
+            BigDecimal quantity = product.getMaxStock() != null && product.getMaxStock().signum() > 0
+                    ? product.getMaxStock().subtract(available)
+                    : product.getReorderPoint().multiply(TWO).subtract(available);
+            if (quantity.signum() <= 0) continue;
+            PurchaseRequestLineRequest lineRequest = new PurchaseRequestLineRequest();
+            lineRequest.setProductId(product.getId());
+            lineRequest.setQuantity(quantity);
+            lineRequests.add(lineRequest);
+        }
+
+        if (lineRequests.isEmpty()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "No low-stock products to reorder");
+        }
+
+        PurchaseRequest pr = PurchaseRequest.builder()
+                .companyId(request.getCompanyId())
+                .departmentId(request.getDepartmentId())
+                .requestDate(request.getRequestDate())
+                .requestedBy(actingUsername)
+                .source(PurchaseRequestSource.AUTO_REORDER)
+                .build();
+        purchaseRequestRepository.save(pr);
+        pr.setRequestNumber("PR-" + String.format("%06d", pr.getId()));
+        purchaseRequestRepository.save(pr);
+
+        List<PurchaseRequestLine> lines = saveLines(pr.getId(), lineRequests);
         return toFullResponse(pr, lines);
     }
 
@@ -264,6 +332,7 @@ public class PurchaseRequestServiceImpl implements PurchaseRequestService {
                 .notes(pr.getNotes())
                 .rejectionReason(pr.getRejectionReason())
                 .requestedBy(pr.getRequestedBy())
+                .source(pr.getSource().name())
                 .lines(lines)
                 .build();
     }

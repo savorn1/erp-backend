@@ -10,6 +10,7 @@ import com.example.erp.dto.UpdateSalesOrderRequest;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.Customer;
 import com.example.erp.entity.CustomerGroup;
+import com.example.erp.entity.InventorySettings;
 import com.example.erp.entity.PriceGroup;
 import com.example.erp.entity.Product;
 import com.example.erp.entity.SalesOrder;
@@ -28,6 +29,7 @@ import com.example.erp.repository.SalesOrderLineRepository;
 import com.example.erp.repository.SalesOrderRepository;
 import com.example.erp.repository.StockLevelRepository;
 import com.example.erp.repository.WarehouseRepository;
+import com.example.erp.service.InventorySettingsService;
 import com.example.erp.service.SalesOrderService;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
@@ -61,6 +63,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final CustomerGroupRepository customerGroupRepository;
     private final ProductPriceRepository productPriceRepository;
     private final PriceGroupRepository priceGroupRepository;
+    private final StockAvailabilityService stockAvailabilityService;
+    private final InventorySettingsService inventorySettingsService;
 
     @Override
     @Transactional(readOnly = true)
@@ -125,6 +129,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         requireWarehouse(request.getWarehouseId(), request.getCompanyId());
         validateLineProducts(request.getLines(), request.getCompanyId());
 
+        requireForeignCurrencyPair(request.getForeignCurrency(), request.getExchangeRate());
         SalesOrder so = SalesOrder.builder()
                 .companyId(request.getCompanyId())
                 .customerId(request.getCustomerId())
@@ -132,6 +137,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .orderDate(request.getOrderDate())
                 .expectedDate(request.getExpectedDate())
                 .notes(request.getNotes())
+                .foreignCurrency(request.getForeignCurrency())
+                .exchangeRate(request.getExchangeRate())
                 .createdBy(actingUsername)
                 .build();
         salesOrderRepository.save(so);
@@ -153,6 +160,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         requireCustomer(request.getCustomerId(), request.getCompanyId());
         requireWarehouse(request.getWarehouseId(), request.getCompanyId());
         validateLineProducts(request.getLines(), request.getCompanyId());
+        requireForeignCurrencyPair(request.getForeignCurrency(), request.getExchangeRate());
 
         so.setCompanyId(request.getCompanyId());
         so.setCustomerId(request.getCustomerId());
@@ -160,6 +168,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         so.setOrderDate(request.getOrderDate());
         so.setExpectedDate(request.getExpectedDate());
         so.setNotes(request.getNotes());
+        so.setForeignCurrency(request.getForeignCurrency());
+        so.setExchangeRate(request.getExchangeRate());
         salesOrderRepository.save(so);
 
         lineRepository.deleteBySalesOrderId(id);
@@ -179,9 +189,11 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return toFullResponse(so, lineRepository.findBySalesOrderId(id));
     }
 
-    // Approval is the gate where stock availability is actually checked — a
-    // soft, point-in-time check (like StockTransferServiceImpl.approve),
-    // not a hard reservation. Confirming here is what "Order confirmation"
+    // Approval is the gate where stock availability is actually checked and
+    // (when InventorySettings.reserveStock is on) where a real reservation
+    // is created — see StockAvailabilityService.check for the precedence
+    // (allowOverselling/oversellingApprovalRequired/allowNegativeStock/
+    // backorderEnabled). Confirming here is what "Order confirmation"
     // means: the order is now eligible for delivery (see
     // DeliveryServiceImpl.createDelivery's status guard).
     @Override
@@ -192,18 +204,17 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only submitted sales orders can be approved");
         }
         List<SalesOrderLine> lines = lineRepository.findBySalesOrderId(id);
-        Map<Long, Product> products = productRepository.findAllById(
-                lines.stream().map(SalesOrderLine::getProductId).distinct().toList()
-        ).stream().collect(Collectors.toMap(Product::getId, p -> p));
+        InventorySettings settings = inventorySettingsService.resolveForCompany(so.getCompanyId());
 
         for (SalesOrderLine line : lines) {
             BigDecimal remaining = line.getQuantityOrdered().subtract(line.getQuantityDelivered());
-            BigDecimal available = availableQuantity(line.getProductId(), so.getWarehouseId());
-            if (remaining.compareTo(available) > 0) {
-                Product product = products.get(line.getProductId());
-                throw new AppException(HttpStatus.BAD_REQUEST,
-                        "Insufficient stock on hand (" + available + ") to confirm "
-                                + (product == null ? "product " + line.getProductId() : product.getName()));
+            BigDecimal backordered = stockAvailabilityService.check(so.getCompanyId(), line.getProductId(), so.getWarehouseId(), remaining, actingUsername);
+            if (backordered.signum() > 0) {
+                line.setBackorderedQuantity(backordered);
+                lineRepository.save(line);
+            }
+            if (settings.isReserveStock()) {
+                reserve(line.getProductId(), so.getCompanyId(), so.getWarehouseId(), remaining);
             }
         }
 
@@ -212,14 +223,28 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return toFullResponse(so, lines);
     }
 
-    // Sums every bin (plus the unbinned row, if any) this product holds at
-    // the warehouse — a product received into a bin via GoodsReceipt would
-    // otherwise look permanently out of stock here, since this only ever
-    // reads, never targets, a specific bin.
-    private BigDecimal availableQuantity(Long productId, Long warehouseId) {
-        return stockLevelRepository.findByProductIdAndWarehouseId(productId, warehouseId).stream()
-                .map(StockLevel::getQuantityOnHand)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    // Adjusts the unbinned "pool" row's reservedQuantity by `delta` (positive
+    // to reserve, negative to release), floored at zero — same unbinned-row
+    // convention PosStockService uses for restoring stock without exact bin
+    // provenance.
+    private void adjustReservation(Long productId, Long companyId, Long warehouseId, BigDecimal delta) {
+        StockLevel unbinned = stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(productId, warehouseId)
+                .orElseGet(() -> StockLevel.builder()
+                        .companyId(companyId)
+                        .productId(productId)
+                        .warehouseId(warehouseId)
+                        .build());
+        BigDecimal updated = unbinned.getReservedQuantity().add(delta);
+        unbinned.setReservedQuantity(updated.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : updated);
+        stockLevelRepository.save(unbinned);
+    }
+
+    private void reserve(Long productId, Long companyId, Long warehouseId, BigDecimal quantity) {
+        adjustReservation(productId, companyId, warehouseId, quantity);
+    }
+
+    private void release(Long productId, Long companyId, Long warehouseId, BigDecimal quantity) {
+        adjustReservation(productId, companyId, warehouseId, quantity.negate());
     }
 
     @Override
@@ -229,6 +254,16 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         if (so.getStatus() != SalesOrderStatus.DRAFT && so.getStatus() != SalesOrderStatus.SUBMITTED
                 && so.getStatus() != SalesOrderStatus.CONFIRMED) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft, submitted, or confirmed sales orders can be cancelled");
+        }
+        // Only a CONFIRMED order ever reserved anything — DRAFT/SUBMITTED
+        // never passed through approveSalesOrder.
+        if (so.getStatus() == SalesOrderStatus.CONFIRMED && inventorySettingsService.resolveForCompany(so.getCompanyId()).isReserveStock()) {
+            for (SalesOrderLine line : lineRepository.findBySalesOrderId(id)) {
+                BigDecimal remaining = line.getQuantityOrdered().subtract(line.getQuantityDelivered());
+                if (remaining.signum() > 0) {
+                    release(line.getProductId(), so.getCompanyId(), so.getWarehouseId(), remaining);
+                }
+            }
         }
         so.setStatus(SalesOrderStatus.CANCELLED);
         salesOrderRepository.save(so);
@@ -319,6 +354,15 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         }
     }
 
+    // Both null (base currency only) or both set — never just one.
+    private void requireForeignCurrencyPair(String foreignCurrency, BigDecimal exchangeRate) {
+        boolean hasCurrency = foreignCurrency != null && !foreignCurrency.isBlank();
+        boolean hasRate = exchangeRate != null;
+        if (hasCurrency != hasRate) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Both foreign currency and exchange rate are required together");
+        }
+    }
+
     private Company requireCompany(Long companyId) {
         return companyRepository.findById(companyId)
                 .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Company not found with id: " + companyId));
@@ -380,6 +424,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                             .taxRate(taxRate)
                             .taxAmount(taxAmount)
                             .quantityDelivered(line.getQuantityDelivered())
+                            .backorderedQuantity(nonNull(line.getBackorderedQuantity()))
                             .lineTotal(afterDiscount.add(taxAmount))
                             .build();
                 })
@@ -414,6 +459,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             taxAmount = taxAmount.add(lineTax);
         }
         BigDecimal totalAmount = subtotal.subtract(discountAmount).add(taxAmount);
+        BigDecimal foreignTotalAmount = so.getExchangeRate() != null
+                ? totalAmount.divide(so.getExchangeRate(), 4, RoundingMode.HALF_UP)
+                : null;
         return SalesOrderResponse.builder()
                 .id(so.getId())
                 .companyId(so.getCompanyId())
@@ -431,6 +479,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .subtotal(subtotal)
                 .discountAmount(discountAmount)
                 .taxAmount(taxAmount)
-                .totalAmount(totalAmount);
+                .totalAmount(totalAmount)
+                .foreignCurrency(so.getForeignCurrency())
+                .exchangeRate(so.getExchangeRate())
+                .foreignTotalAmount(foreignTotalAmount);
     }
 }

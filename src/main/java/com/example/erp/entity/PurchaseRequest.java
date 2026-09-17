@@ -65,4 +65,14 @@ public class PurchaseRequest {
     private String rejectionReason;
 
     private String requestedBy;
+
+    // MANUAL for every PR created the normal way; AUTO_REORDER for ones
+    // generated from the Low Stock report — see PurchaseRequestServiceImpl.
+    // generateFromLowStock. columnDefinition carries an explicit SQL default
+    // since this table already has rows (same reasoning as
+    // PosSaleLine.returnedQuantity elsewhere in this codebase).
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, columnDefinition = "varchar(20) not null default 'MANUAL'")
+    @Builder.Default
+    private PurchaseRequestSource source = PurchaseRequestSource.MANUAL;
 }

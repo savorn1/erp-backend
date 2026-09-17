@@ -9,6 +9,7 @@ import com.example.erp.entity.User;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.RefreshTokenRepository;
 import com.example.erp.repository.UserRepository;
+import com.example.erp.service.AuditLogService;
 import com.example.erp.service.AuthService;
 import com.example.erp.service.JwtService;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ public class AuthServiceImpl implements AuthService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final AuditLogService auditLogService;
 
     @Value("${jwt.refresh-expiration}")
     private long refreshExpiration;
@@ -47,6 +49,8 @@ public class AuthServiceImpl implements AuthService {
             throw new AppException(HttpStatus.FORBIDDEN, "Account is disabled");
         }
 
+        auditLogService.record(user.getCompanyId(), null, "LOGIN", "POST", "/api/auth/login",
+                user.getId(), user.getUsername(), 200, "Login: " + user.getUsername());
         return buildAuthResponse(user);
     }
 
@@ -81,6 +85,9 @@ public class AuthServiceImpl implements AuthService {
                 .ifPresent(stored -> {
                     stored.setRevoked(true);
                     refreshTokenRepository.save(stored);
+                    userRepository.findById(stored.getUserId()).ifPresent(user ->
+                            auditLogService.record(user.getCompanyId(), null, "LOGOUT", "POST", "/api/auth/logout",
+                                    user.getId(), user.getUsername(), 200, "Logout: " + user.getUsername()));
                 });
     }
 

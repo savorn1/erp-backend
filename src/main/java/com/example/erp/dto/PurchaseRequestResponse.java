@@ -26,5 +26,6 @@ public class PurchaseRequestResponse {
     private String notes;
     private String rejectionReason;
     private String requestedBy;
+    private String source;
     private List<PurchaseRequestLineResponse> lines;
 }

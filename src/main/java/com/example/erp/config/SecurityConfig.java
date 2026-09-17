@@ -1,7 +1,9 @@
 package com.example.erp.config;
 
 import com.example.erp.security.PermissionAuthorizationManager;
+import com.example.erp.service.AuditLogService;
 import com.example.erp.service.JwtService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,6 +26,8 @@ public class SecurityConfig {
 
     private final JwtService jwtService;
     private final PermissionAuthorizationManager permissionAuthorizationManager;
+    private final AuditLogService auditLogService;
+    private final ObjectMapper objectMapper;
 
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -31,6 +35,9 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .addFilterBefore(new JwtAuthenticationFilter(jwtService), UsernamePasswordAuthenticationFilter.class)
+            // Must run after JwtAuthenticationFilter so SecurityContextHolder
+            // is already populated with the acting user by the time it reads it.
+            .addFilterAfter(new AuditLogFilter(auditLogService, objectMapper), JwtAuthenticationFilter.class)
             // Without an explicit entry point, Spring Security defaults to Http403ForbiddenEntryPoint,
             // which also intercepts the /error dispatch a ResponseStatusException triggers — silently
             // rewriting an intended 401 (bad login) into a bare 403. Permit /error and set a real

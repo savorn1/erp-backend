@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -26,6 +27,11 @@ public class CreateSalesOrderRequest {
     private LocalDate expectedDate;
 
     private String notes;
+
+    // Optional reference-only foreign currency — see SalesOrder's own
+    // comment. Both null or both set, enforced in SalesOrderServiceImpl.
+    private String foreignCurrency;
+    private BigDecimal exchangeRate;
 
     @NotEmpty
     @Valid

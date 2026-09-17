@@ -2,6 +2,7 @@ package com.example.erp.controller;
 
 import com.example.erp.dto.ApiResponse;
 import com.example.erp.dto.CreatePurchaseRequestRequest;
+import com.example.erp.dto.GenerateFromLowStockRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.PurchaseRequestFilterRequest;
 import com.example.erp.dto.PurchaseRequestResponse;
@@ -40,6 +41,13 @@ public class PurchaseRequestController {
                                                                           Authentication authentication) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Purchase request created", purchaseRequestService.createPurchaseRequest(request, requireUsername(authentication))));
+    }
+
+    @PostMapping("/generate-from-low-stock")
+    public ResponseEntity<ApiResponse<PurchaseRequestResponse>> generateFromLowStock(@Valid @RequestBody GenerateFromLowStockRequest request,
+                                                                                        Authentication authentication) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Purchase request generated",
+                purchaseRequestService.generateFromLowStock(request, requireUsername(authentication))));
     }
 
     @PutMapping("/{id}")

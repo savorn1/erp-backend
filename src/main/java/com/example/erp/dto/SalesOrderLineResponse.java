@@ -26,4 +26,5 @@ public class SalesOrderLineResponse {
     private BigDecimal quantityDelivered;
     // Net of discount, inclusive of tax.
     private BigDecimal lineTotal;
+    private BigDecimal backorderedQuantity;
 }

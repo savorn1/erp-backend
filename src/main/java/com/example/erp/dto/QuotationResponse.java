@@ -29,5 +29,10 @@ public class QuotationResponse {
     private String notes;
     private String createdBy;
     private BigDecimal totalAmount;
+    private String foreignCurrency;
+    private BigDecimal exchangeRate;
+    // totalAmount / exchangeRate, only when both foreignCurrency and
+    // exchangeRate are set — a display-only convenience, never stored.
+    private BigDecimal foreignTotalAmount;
     private List<QuotationLineResponse> lines;
 }

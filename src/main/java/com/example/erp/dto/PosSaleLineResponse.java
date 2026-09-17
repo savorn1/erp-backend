@@ -23,4 +23,5 @@ public class PosSaleLineResponse {
     private BigDecimal taxRate;
     private BigDecimal lineTotal;
     private BigDecimal returnedQuantity;
+    private BigDecimal backorderedQuantity;
 }

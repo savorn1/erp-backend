@@ -171,7 +171,7 @@ public class PosSaleServiceImpl implements PosSaleService {
 
         // ── Lines + stock decrement (pessimistic-locked) ────────────────────
         for (PricedLine line : pricedLines) {
-            posSaleLineRepository.save(PosSaleLine.builder()
+            PosSaleLine savedLine = posSaleLineRepository.save(PosSaleLine.builder()
                     .posSaleId(sale.getId())
                     .productId(line.productId())
                     .quantity(line.quantity())
@@ -180,8 +180,12 @@ public class PosSaleServiceImpl implements PosSaleService {
                     .taxRate(line.taxRate())
                     .lineTotal(line.lineTotal())
                     .build());
-            posStockService.decrease(register.getCompanyId(), register.getWarehouseId(), line.productId(), line.quantity(),
+            BigDecimal backordered = posStockService.decrease(register.getCompanyId(), register.getWarehouseId(), line.productId(), line.quantity(),
                     "POS_SALE", sale.getId(), actingUsername);
+            if (backordered.signum() > 0) {
+                savedLine.setBackorderedQuantity(backordered);
+                posSaleLineRepository.save(savedLine);
+            }
         }
 
         // ── Tender lines (non-cash as requested, one applied-cash line) ─────
@@ -281,6 +285,7 @@ public class PosSaleServiceImpl implements PosSaleService {
                             .taxRate(line.getTaxRate())
                             .lineTotal(line.getLineTotal())
                             .returnedQuantity(line.getReturnedQuantity())
+                            .backorderedQuantity(line.getBackorderedQuantity())
                             .build();
                 })
                 .toList();

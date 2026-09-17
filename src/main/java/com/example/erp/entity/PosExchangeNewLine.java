@@ -62,4 +62,12 @@ public class PosExchangeNewLine {
 
     @Column(name = "cost_price", nullable = false, precision = 19, scale = 4)
     private BigDecimal costPrice;
+
+    // Portion of `quantity` that exceeded on-hand and was let through anyway
+    // under InventorySettings.backorderEnabled — 0 otherwise. See
+    // PosStockService.decrease's return value and StockAvailabilityService.
+    @Column(name = "backordered_quantity", nullable = false, precision = 19, scale = 4,
+            columnDefinition = "numeric(19,4) not null default 0")
+    @Builder.Default
+    private BigDecimal backorderedQuantity = BigDecimal.ZERO;
 }

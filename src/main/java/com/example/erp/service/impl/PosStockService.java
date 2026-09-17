@@ -3,11 +3,9 @@ package com.example.erp.service.impl;
 import com.example.erp.entity.StockLevel;
 import com.example.erp.entity.StockMovement;
 import com.example.erp.entity.StockMovementType;
-import com.example.erp.exception.AppException;
 import com.example.erp.repository.StockLevelRepository;
 import com.example.erp.repository.StockMovementRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -27,9 +25,15 @@ public class PosStockService {
 
     private final StockLevelRepository stockLevelRepository;
     private final StockMovementRepository stockMovementRepository;
+    private final StockAvailabilityService stockAvailabilityService;
 
-    public void decrease(Long companyId, Long warehouseId, Long productId, BigDecimal quantity,
-                          String referenceType, Long referenceId, String actingUsername) {
+    // Returns the *physical* shortfall let through as a backorder (0 if
+    // none) — StockAvailabilityService.check has already thrown if the
+    // company's InventorySettings don't permit this quantity at all.
+    public BigDecimal decrease(Long companyId, Long warehouseId, Long productId, BigDecimal quantity,
+                                String referenceType, Long referenceId, String actingUsername) {
+        BigDecimal backordered = stockAvailabilityService.check(companyId, productId, warehouseId, quantity, actingUsername);
+
         List<StockLevel> stockLevels = stockLevelRepository.findByProductIdAndWarehouseIdForUpdate(productId, warehouseId).stream()
                 .sorted(Comparator.comparing(StockLevel::getQuantityOnHand).reversed())
                 .toList();
@@ -42,7 +46,18 @@ public class PosStockService {
             remaining = remaining.subtract(take);
         }
         if (remaining.compareTo(BigDecimal.ZERO) > 0) {
-            throw new AppException(HttpStatus.BAD_REQUEST, "Insufficient stock for product id " + productId);
+            // Already cleared by the check above (allowNegativeStock or
+            // backorderEnabled) — push the overflow onto the unbinned pool
+            // row and let it go negative, same idiom PosStockService.increase
+            // uses for restoring stock without exact bin provenance.
+            StockLevel unbinned = stockLevelRepository.findByProductIdAndWarehouseIdAndBinIdIsNull(productId, warehouseId)
+                    .orElseGet(() -> StockLevel.builder()
+                            .companyId(companyId)
+                            .productId(productId)
+                            .warehouseId(warehouseId)
+                            .build());
+            unbinned.setQuantityOnHand(unbinned.getQuantityOnHand().subtract(remaining));
+            stockLevelRepository.save(unbinned);
         }
         stockMovementRepository.save(StockMovement.builder()
                 .companyId(companyId)
@@ -54,6 +69,7 @@ public class PosStockService {
                 .referenceId(referenceId)
                 .createdBy(actingUsername)
                 .build());
+        return backordered;
     }
 
     public void increase(Long companyId, Long warehouseId, Long productId, BigDecimal quantity,

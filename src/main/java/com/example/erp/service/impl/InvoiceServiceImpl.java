@@ -139,6 +139,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (soLines.isEmpty()) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Sales order has no lines to invoice");
         }
+        requireForeignCurrencyPair(request.getForeignCurrency(), request.getExchangeRate());
 
         Invoice invoice = Invoice.builder()
                 .companyId(so.getCompanyId())
@@ -148,6 +149,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                 .dueDate(request.getDueDate())
                 .notes(request.getNotes())
                 .createdBy(actingUsername)
+                .foreignCurrency(request.getForeignCurrency())
+                .exchangeRate(request.getExchangeRate())
                 .build();
         invoiceRepository.save(invoice);
         invoice.setInvoiceNumber("INV-" + String.format("%06d", invoice.getId()));
@@ -185,6 +188,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
         Map<Long, SalesOrderLine> soLinesById = salesOrderLineRepository.findBySalesOrderId(so.getId()).stream()
                 .collect(Collectors.toMap(SalesOrderLine::getId, l -> l));
+        requireForeignCurrencyPair(request.getForeignCurrency(), request.getExchangeRate());
 
         Invoice invoice = Invoice.builder()
                 .companyId(so.getCompanyId())
@@ -195,6 +199,8 @@ public class InvoiceServiceImpl implements InvoiceService {
                 .dueDate(request.getDueDate())
                 .notes(request.getNotes())
                 .createdBy(actingUsername)
+                .foreignCurrency(request.getForeignCurrency())
+                .exchangeRate(request.getExchangeRate())
                 .build();
         invoiceRepository.save(invoice);
         invoice.setInvoiceNumber("INV-" + String.format("%06d", invoice.getId()));
@@ -303,6 +309,14 @@ public class InvoiceServiceImpl implements InvoiceService {
                 .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Invoice not found with id: " + id));
     }
 
+    private void requireForeignCurrencyPair(String foreignCurrency, BigDecimal exchangeRate) {
+        boolean hasCurrency = foreignCurrency != null && !foreignCurrency.isBlank();
+        boolean hasRate = exchangeRate != null;
+        if (hasCurrency != hasRate) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Both foreign currency and exchange rate are required together");
+        }
+    }
+
     private InvoiceResponse toResponse(Invoice invoice, List<InvoiceLine> lines) {
         String companyName = companyRepository.findById(invoice.getCompanyId()).map(Company::getName).orElse(null);
         String customerName = customerRepository.findById(invoice.getCustomerId()).map(Customer::getName).orElse(null);
@@ -352,6 +366,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                 ? (totals[3].compareTo(BigDecimal.ZERO) == 0 ? "UNPAID" : "PAID")
                 : (paidAmount.compareTo(BigDecimal.ZERO) > 0 ? "PARTIALLY_PAID" : "UNPAID");
         int daysOverdue = daysOverdue(invoice.getDueDate(), outstandingAmount, LocalDate.now());
+        BigDecimal foreignTotalAmount = invoice.getExchangeRate() != null
+                ? totals[3].divide(invoice.getExchangeRate(), 4, RoundingMode.HALF_UP)
+                : null;
 
         return InvoiceResponse.builder()
                 .id(invoice.getId())
@@ -373,6 +390,9 @@ public class InvoiceServiceImpl implements InvoiceService {
                 .discountAmount(totals[1])
                 .taxAmount(totals[2])
                 .totalAmount(totals[3])
+                .foreignCurrency(invoice.getForeignCurrency())
+                .exchangeRate(invoice.getExchangeRate())
+                .foreignTotalAmount(foreignTotalAmount)
                 .creditedAmount(creditedAmount)
                 .paidAmount(paidAmount)
                 .outstandingAmount(outstandingAmount)

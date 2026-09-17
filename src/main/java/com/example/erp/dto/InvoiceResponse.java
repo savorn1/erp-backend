@@ -34,6 +34,11 @@ public class InvoiceResponse {
     private BigDecimal discountAmount;
     private BigDecimal taxAmount;
     private BigDecimal totalAmount;
+    private String foreignCurrency;
+    private BigDecimal exchangeRate;
+    // totalAmount / exchangeRate, only when both foreignCurrency and
+    // exchangeRate are set — a display-only convenience, never stored.
+    private BigDecimal foreignTotalAmount;
     // Sum of credit notes issued against this invoice.
     private BigDecimal creditedAmount;
     // Net of payment allocations (payments minus any refunds against them).

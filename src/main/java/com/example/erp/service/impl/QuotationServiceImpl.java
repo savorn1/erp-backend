@@ -37,6 +37,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -124,6 +125,7 @@ public class QuotationServiceImpl implements QuotationService {
             requireCustomer(request.getCustomerId(), request.getCompanyId());
         }
         validateLineProducts(request.getLines(), request.getCompanyId());
+        requireForeignCurrencyPair(request.getForeignCurrency(), request.getExchangeRate());
 
         Quotation quotation = Quotation.builder()
                 .companyId(request.getCompanyId())
@@ -132,6 +134,8 @@ public class QuotationServiceImpl implements QuotationService {
                 .validUntil(request.getValidUntil())
                 .notes(request.getNotes())
                 .createdBy(actingUsername)
+                .foreignCurrency(request.getForeignCurrency())
+                .exchangeRate(request.getExchangeRate())
                 .build();
         quotationRepository.save(quotation);
         quotation.setQuotationNumber("QT-" + String.format("%06d", quotation.getId()));
@@ -150,6 +154,7 @@ public class QuotationServiceImpl implements QuotationService {
             throw new AppException(HttpStatus.BAD_REQUEST, "Cannot create a quotation for a closed opportunity");
         }
         validateLineProducts(request.getLines(), opportunity.getCompanyId());
+        requireForeignCurrencyPair(request.getForeignCurrency(), request.getExchangeRate());
 
         Quotation quotation = Quotation.builder()
                 .companyId(opportunity.getCompanyId())
@@ -159,6 +164,8 @@ public class QuotationServiceImpl implements QuotationService {
                 .validUntil(request.getValidUntil())
                 .notes(request.getNotes())
                 .createdBy(actingUsername)
+                .foreignCurrency(request.getForeignCurrency())
+                .exchangeRate(request.getExchangeRate())
                 .build();
         quotationRepository.save(quotation);
         quotation.setQuotationNumber("QT-" + String.format("%06d", quotation.getId()));
@@ -187,11 +194,14 @@ public class QuotationServiceImpl implements QuotationService {
             requireCustomer(request.getCustomerId(), quotation.getCompanyId());
         }
         validateLineProducts(request.getLines(), quotation.getCompanyId());
+        requireForeignCurrencyPair(request.getForeignCurrency(), request.getExchangeRate());
 
         quotation.setCustomerId(request.getCustomerId());
         quotation.setQuotationDate(request.getQuotationDate());
         quotation.setValidUntil(request.getValidUntil());
         quotation.setNotes(request.getNotes());
+        quotation.setForeignCurrency(request.getForeignCurrency());
+        quotation.setExchangeRate(request.getExchangeRate());
         quotationRepository.save(quotation);
 
         quotationLineRepository.deleteByQuotationId(id);
@@ -332,6 +342,9 @@ public class QuotationServiceImpl implements QuotationService {
         BigDecimal totalAmount = lines.stream()
                 .map(l -> l.getQuantity().multiply(l.getUnitPrice()))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal foreignTotalAmount = quotation.getExchangeRate() != null
+                ? totalAmount.divide(quotation.getExchangeRate(), 4, RoundingMode.HALF_UP)
+                : null;
         return QuotationResponse.builder()
                 .id(quotation.getId())
                 .companyId(quotation.getCompanyId())
@@ -346,6 +359,17 @@ public class QuotationServiceImpl implements QuotationService {
                 .status(quotation.getStatus().name())
                 .notes(quotation.getNotes())
                 .createdBy(quotation.getCreatedBy())
-                .totalAmount(totalAmount);
+                .totalAmount(totalAmount)
+                .foreignCurrency(quotation.getForeignCurrency())
+                .exchangeRate(quotation.getExchangeRate())
+                .foreignTotalAmount(foreignTotalAmount);
+    }
+
+    private void requireForeignCurrencyPair(String foreignCurrency, BigDecimal exchangeRate) {
+        boolean hasCurrency = foreignCurrency != null && !foreignCurrency.isBlank();
+        boolean hasRate = exchangeRate != null;
+        if (hasCurrency != hasRate) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Both foreign currency and exchange rate are required together");
+        }
     }
 }
