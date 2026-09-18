@@ -5,6 +5,7 @@ import com.example.erp.dto.CreatePurchaseOrderRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.PurchaseOrderFilterRequest;
 import com.example.erp.dto.PurchaseOrderResponse;
+import com.example.erp.dto.SendDocumentEmailRequest;
 import com.example.erp.dto.UpdatePurchaseOrderRequest;
 import com.example.erp.exception.AppException;
 import com.example.erp.service.PurchaseOrderService;
@@ -53,8 +54,9 @@ public class PurchaseOrderController {
     }
 
     @PostMapping("/{id}/approve")
-    public ResponseEntity<ApiResponse<PurchaseOrderResponse>> approve(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success("Purchase order approved", purchaseOrderService.approvePurchaseOrder(id)));
+    public ResponseEntity<ApiResponse<PurchaseOrderResponse>> approve(@PathVariable Long id, Authentication authentication) {
+        return ResponseEntity.ok(ApiResponse.success("Purchase order approved",
+                purchaseOrderService.approvePurchaseOrder(id, requireUsername(authentication))));
     }
 
     @PostMapping("/{id}/send")
@@ -71,6 +73,13 @@ public class PurchaseOrderController {
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
         purchaseOrderService.deletePurchaseOrder(id);
         return ResponseEntity.ok(ApiResponse.success("Purchase order deleted", null));
+    }
+
+    @PostMapping("/{id}/email")
+    public ResponseEntity<ApiResponse<Void>> email(@PathVariable Long id,
+                                                    @Valid @RequestBody(required = false) SendDocumentEmailRequest request) {
+        purchaseOrderService.emailPurchaseOrder(id, request != null ? request : new SendDocumentEmailRequest());
+        return ResponseEntity.ok(ApiResponse.success("Email sent", null));
     }
 
     private String requireUsername(Authentication authentication) {

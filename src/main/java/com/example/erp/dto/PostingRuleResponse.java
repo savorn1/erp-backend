@@ -47,4 +47,10 @@ public class PostingRuleResponse {
     private String inventoryAssetAccountLabel;
     private Long cashVarianceAccountId;
     private String cashVarianceAccountLabel;
+    private Long posCashAccountId;
+    private String posCashAccountLabel;
+    private Long pettyCashAccountId;
+    private String pettyCashAccountLabel;
+    private Long cashInTransitAccountId;
+    private String cashInTransitAccountLabel;
 }

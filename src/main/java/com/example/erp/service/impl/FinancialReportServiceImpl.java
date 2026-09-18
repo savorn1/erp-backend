@@ -3,6 +3,9 @@ package com.example.erp.service.impl;
 import com.example.erp.dto.BalanceSheetFilterRequest;
 import com.example.erp.dto.BalanceSheetLineResponse;
 import com.example.erp.dto.BalanceSheetResponse;
+import com.example.erp.dto.BudgetVsActualFilterRequest;
+import com.example.erp.dto.BudgetVsActualResponse;
+import com.example.erp.dto.BudgetVsActualRowResponse;
 import com.example.erp.dto.CashFlowAccountRowResponse;
 import com.example.erp.dto.CashFlowFilterRequest;
 import com.example.erp.dto.CashFlowResponse;
@@ -18,16 +21,20 @@ import com.example.erp.dto.TrialBalanceResponse;
 import com.example.erp.dto.TrialBalanceRowResponse;
 import com.example.erp.entity.Account;
 import com.example.erp.entity.AccountType;
+import com.example.erp.entity.AccountingPeriod;
 import com.example.erp.entity.BankAccount;
 import com.example.erp.entity.BankTransaction;
 import com.example.erp.entity.BankTransactionType;
+import com.example.erp.entity.Budget;
 import com.example.erp.entity.JournalEntry;
 import com.example.erp.entity.JournalEntryLine;
 import com.example.erp.entity.JournalEntryStatus;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.AccountRepository;
+import com.example.erp.repository.AccountingPeriodRepository;
 import com.example.erp.repository.BankAccountRepository;
 import com.example.erp.repository.BankTransactionRepository;
+import com.example.erp.repository.BudgetRepository;
 import com.example.erp.repository.JournalEntryLineRepository;
 import com.example.erp.repository.JournalEntryRepository;
 import com.example.erp.service.FinancialReportService;
@@ -42,8 +49,10 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -55,6 +64,8 @@ public class FinancialReportServiceImpl implements FinancialReportService {
     private final AccountRepository accountRepository;
     private final BankAccountRepository bankAccountRepository;
     private final BankTransactionRepository bankTransactionRepository;
+    private final BudgetRepository budgetRepository;
+    private final AccountingPeriodRepository accountingPeriodRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -377,6 +388,65 @@ public class FinancialReportServiceImpl implements FinancialReportService {
                 .accountCode(account.getAccountCode())
                 .accountName(account.getName())
                 .amount(amount)
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public BudgetVsActualResponse budgetVsActual(BudgetVsActualFilterRequest filter) {
+        List<JournalEntryLine> lines = postedLines(filter.getCompanyId(), filter.getDateFrom(), filter.getDateTo());
+        if (filter.getCostCenterId() != null) {
+            lines = lines.stream().filter(l -> filter.getCostCenterId().equals(l.getCostCenterId())).toList();
+        }
+        Map<Long, BigDecimal[]> actualsByAccount = groupByAccount(lines);
+
+        List<AccountingPeriod> periods = filter.getCompanyId() != null
+                ? accountingPeriodRepository.findByCompanyId(filter.getCompanyId())
+                : List.of();
+        List<Long> periodIds = periods.stream()
+                .filter(p -> filter.getDateFrom() == null || !p.getEndDate().isBefore(filter.getDateFrom()))
+                .filter(p -> filter.getDateTo() == null || !p.getStartDate().isAfter(filter.getDateTo()))
+                .map(AccountingPeriod::getId)
+                .toList();
+        List<Budget> budgets = periodIds.isEmpty() ? List.of() : budgetRepository.findByAccountingPeriodIdIn(periodIds);
+        if (filter.getCostCenterId() != null) {
+            budgets = budgets.stream().filter(b -> filter.getCostCenterId().equals(b.getCostCenterId())).toList();
+        }
+        Map<Long, BigDecimal> budgetByAccount = new HashMap<>();
+        for (Budget budget : budgets) {
+            budgetByAccount.merge(budget.getAccountId(), budget.getAmount(), BigDecimal::add);
+        }
+
+        Set<Long> accountIds = new HashSet<>();
+        accountIds.addAll(actualsByAccount.keySet());
+        accountIds.addAll(budgetByAccount.keySet());
+        Map<Long, Account> accounts = accountRepository.findAllById(accountIds).stream()
+                .collect(Collectors.toMap(Account::getId, a -> a));
+
+        List<BudgetVsActualRowResponse> rows = new ArrayList<>();
+        for (Long accountId : accountIds) {
+            Account account = accounts.get(accountId);
+            if (account == null) continue;
+            boolean debitNormal = account.getAccountType() == AccountType.ASSET || account.getAccountType() == AccountType.EXPENSE;
+            BigDecimal[] debitCredit = actualsByAccount.getOrDefault(accountId, new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
+            BigDecimal actual = debitNormal ? debitCredit[0].subtract(debitCredit[1]) : debitCredit[1].subtract(debitCredit[0]);
+            BigDecimal budgetAmount = budgetByAccount.getOrDefault(accountId, BigDecimal.ZERO);
+            rows.add(BudgetVsActualRowResponse.builder()
+                    .accountId(account.getId())
+                    .accountCode(account.getAccountCode())
+                    .accountName(account.getName())
+                    .accountType(account.getAccountType().name())
+                    .budgetAmount(budgetAmount)
+                    .actualAmount(actual)
+                    .varianceAmount(actual.subtract(budgetAmount))
+                    .build());
+        }
+        rows.sort(Comparator.comparing(BudgetVsActualRowResponse::getAccountCode));
+
+        return BudgetVsActualResponse.builder()
+                .dateFrom(filter.getDateFrom())
+                .dateTo(filter.getDateTo())
+                .rows(rows)
                 .build();
     }
 

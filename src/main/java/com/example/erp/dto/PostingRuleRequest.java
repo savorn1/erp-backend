@@ -29,4 +29,7 @@ public class PostingRuleRequest {
     private Long assetDisposalGainLossAccountId;
     private Long inventoryAssetAccountId;
     private Long cashVarianceAccountId;
+    private Long posCashAccountId;
+    private Long pettyCashAccountId;
+    private Long cashInTransitAccountId;
 }

@@ -5,6 +5,7 @@ import com.example.erp.dto.CreateQuotationRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.QuotationFilterRequest;
 import com.example.erp.dto.QuotationResponse;
+import com.example.erp.dto.SendDocumentEmailRequest;
 import com.example.erp.dto.UpdateQuotationRequest;
 import com.example.erp.exception.AppException;
 import com.example.erp.service.QuotationService;
@@ -67,6 +68,13 @@ public class QuotationController {
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
         quotationService.deleteQuotation(id);
         return ResponseEntity.ok(ApiResponse.success("Quotation deleted", null));
+    }
+
+    @PostMapping("/{id}/email")
+    public ResponseEntity<ApiResponse<Void>> email(@PathVariable Long id,
+                                                    @Valid @RequestBody(required = false) SendDocumentEmailRequest request) {
+        quotationService.emailQuotation(id, request != null ? request : new SendDocumentEmailRequest());
+        return ResponseEntity.ok(ApiResponse.success("Email sent", null));
     }
 
     private String requireUsername(Authentication authentication) {

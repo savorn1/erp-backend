@@ -3,6 +3,8 @@ package com.example.erp.service.impl;
 import com.example.erp.dto.AddSupplierNoteRequest;
 import com.example.erp.dto.BalanceAdjustmentRequest;
 import com.example.erp.dto.CreateSupplierRequest;
+import com.example.erp.dto.ImportResultResponse;
+import com.example.erp.dto.ImportRowError;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.SupplierActivityFilterRequest;
 import com.example.erp.dto.SupplierActivityResponse;
@@ -12,6 +14,7 @@ import com.example.erp.dto.UpdateSupplierRequest;
 import com.example.erp.dto.UpdateSupplierStatusRequest;
 import com.example.erp.entity.BalanceAdjustmentType;
 import com.example.erp.entity.Company;
+import com.example.erp.entity.PaymentTerms;
 import com.example.erp.entity.Supplier;
 import com.example.erp.entity.SupplierActivity;
 import com.example.erp.entity.SupplierActivityType;
@@ -22,14 +25,17 @@ import com.example.erp.repository.SupplierActivityRepository;
 import com.example.erp.repository.SupplierRepository;
 import com.example.erp.repository.SupplierTypeRepository;
 import com.example.erp.service.SupplierService;
+import com.example.erp.util.CsvUtils;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.csv.CSVRecord;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -120,6 +126,55 @@ public class SupplierServiceImpl implements SupplierService {
         recordActivity(supplier.getId(), SupplierActivityType.CREATED, "Supplier created", null, actingUsername);
 
         return getSupplier(supplier.getId());
+    }
+
+    @Override
+    public ImportResultResponse importSuppliersFromCsv(MultipartFile file, Long companyId, String actingUsername) {
+        requireCompany(companyId);
+        List<CSVRecord> records = CsvUtils.parse(file);
+        List<ImportRowError> errors = new ArrayList<>();
+        int successCount = 0;
+
+        for (CSVRecord record : records) {
+            int rowNumber = (int) record.getRecordNumber() + 1;
+            try {
+                CreateSupplierRequest request = new CreateSupplierRequest();
+                request.setCompanyId(companyId);
+                request.setName(CsvUtils.getRequired(record, "name"));
+                request.setContactName(CsvUtils.getOptional(record, "contactName"));
+                request.setPhone(CsvUtils.getOptional(record, "phone"));
+                request.setEmail(CsvUtils.getOptional(record, "email"));
+                String supplierTypeName = CsvUtils.getOptional(record, "supplierType");
+                if (supplierTypeName != null) {
+                    SupplierType type = supplierTypeRepository.findByNameIgnoreCase(supplierTypeName)
+                            .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Supplier type not found: " + supplierTypeName));
+                    request.setSupplierTypeId(type.getId());
+                }
+                request.setAddressLine1(CsvUtils.getOptional(record, "addressLine1"));
+                request.setAddressLine2(CsvUtils.getOptional(record, "addressLine2"));
+                request.setCity(CsvUtils.getOptional(record, "city"));
+                request.setState(CsvUtils.getOptional(record, "state"));
+                request.setPostalCode(CsvUtils.getOptional(record, "postalCode"));
+                request.setCountry(CsvUtils.getOptional(record, "country"));
+                request.setCreditLimit(CsvUtils.getDecimal(record, "creditLimit", BigDecimal.ZERO));
+                String paymentTerms = CsvUtils.getOptional(record, "paymentTerms");
+                if (paymentTerms != null) {
+                    request.setPaymentTerms(PaymentTerms.valueOf(paymentTerms.toUpperCase()));
+                }
+
+                createSupplier(request, actingUsername);
+                successCount++;
+            } catch (Exception e) {
+                errors.add(ImportRowError.builder().rowNumber(rowNumber).message(e.getMessage()).build());
+            }
+        }
+
+        return ImportResultResponse.builder()
+                .totalRows(records.size())
+                .successCount(successCount)
+                .failureCount(errors.size())
+                .errors(errors)
+                .build();
     }
 
     @Override

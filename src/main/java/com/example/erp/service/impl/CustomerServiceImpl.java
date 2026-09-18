@@ -7,6 +7,8 @@ import com.example.erp.dto.CustomerActivityFilterRequest;
 import com.example.erp.dto.CustomerActivityResponse;
 import com.example.erp.dto.CustomerFilterRequest;
 import com.example.erp.dto.CustomerResponse;
+import com.example.erp.dto.ImportResultResponse;
+import com.example.erp.dto.ImportRowError;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.UpdateCustomerRequest;
 import com.example.erp.dto.UpdateCustomerStatusRequest;
@@ -17,6 +19,7 @@ import com.example.erp.entity.CustomerActivity;
 import com.example.erp.entity.CustomerActivityType;
 import com.example.erp.entity.CustomerGroup;
 import com.example.erp.entity.CustomerType;
+import com.example.erp.entity.PaymentTerms;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.CompanyRepository;
 import com.example.erp.repository.CustomerActivityRepository;
@@ -24,14 +27,17 @@ import com.example.erp.repository.CustomerGroupRepository;
 import com.example.erp.repository.CustomerRepository;
 import com.example.erp.repository.CustomerTypeRepository;
 import com.example.erp.service.CustomerService;
+import com.example.erp.util.CsvUtils;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.csv.CSVRecord;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -140,6 +146,67 @@ public class CustomerServiceImpl implements CustomerService {
         recordActivity(customer.getId(), CustomerActivityType.CREATED, "Customer created", null, actingUsername);
 
         return getCustomer(customer.getId());
+    }
+
+    @Override
+    public ImportResultResponse importCustomersFromCsv(MultipartFile file, Long companyId, String actingUsername) {
+        requireCompany(companyId);
+        List<CSVRecord> records = CsvUtils.parse(file);
+        List<ImportRowError> errors = new ArrayList<>();
+        int successCount = 0;
+
+        for (CSVRecord record : records) {
+            int rowNumber = (int) record.getRecordNumber() + 1;
+            try {
+                CreateCustomerRequest request = new CreateCustomerRequest();
+                request.setCompanyId(companyId);
+                request.setName(CsvUtils.getRequired(record, "name"));
+                request.setContactName(CsvUtils.getOptional(record, "contactName"));
+                request.setPhone(CsvUtils.getOptional(record, "phone"));
+                request.setEmail(CsvUtils.getOptional(record, "email"));
+                String customerTypeName = CsvUtils.getOptional(record, "customerType");
+                if (customerTypeName != null) {
+                    CustomerType type = customerTypeRepository.findByNameIgnoreCase(customerTypeName)
+                            .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Customer type not found: " + customerTypeName));
+                    request.setCustomerTypeId(type.getId());
+                }
+                String customerGroupName = CsvUtils.getOptional(record, "customerGroup");
+                if (customerGroupName != null) {
+                    CustomerGroup group = customerGroupRepository.findByNameIgnoreCase(customerGroupName)
+                            .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Customer group not found: " + customerGroupName));
+                    request.setCustomerGroupId(group.getId());
+                }
+                request.setBillingAddressLine1(CsvUtils.getOptional(record, "billingAddressLine1"));
+                request.setBillingAddressLine2(CsvUtils.getOptional(record, "billingAddressLine2"));
+                request.setBillingCity(CsvUtils.getOptional(record, "billingCity"));
+                request.setBillingState(CsvUtils.getOptional(record, "billingState"));
+                request.setBillingPostalCode(CsvUtils.getOptional(record, "billingPostalCode"));
+                request.setBillingCountry(CsvUtils.getOptional(record, "billingCountry"));
+                request.setShippingAddressLine1(CsvUtils.getOptional(record, "shippingAddressLine1"));
+                request.setShippingAddressLine2(CsvUtils.getOptional(record, "shippingAddressLine2"));
+                request.setShippingCity(CsvUtils.getOptional(record, "shippingCity"));
+                request.setShippingState(CsvUtils.getOptional(record, "shippingState"));
+                request.setShippingPostalCode(CsvUtils.getOptional(record, "shippingPostalCode"));
+                request.setShippingCountry(CsvUtils.getOptional(record, "shippingCountry"));
+                request.setCreditLimit(CsvUtils.getDecimal(record, "creditLimit", BigDecimal.ZERO));
+                String paymentTerms = CsvUtils.getOptional(record, "paymentTerms");
+                if (paymentTerms != null) {
+                    request.setPaymentTerms(PaymentTerms.valueOf(paymentTerms.toUpperCase()));
+                }
+
+                createCustomer(request, actingUsername);
+                successCount++;
+            } catch (Exception e) {
+                errors.add(ImportRowError.builder().rowNumber(rowNumber).message(e.getMessage()).build());
+            }
+        }
+
+        return ImportResultResponse.builder()
+                .totalRows(records.size())
+                .successCount(successCount)
+                .failureCount(errors.size())
+                .errors(errors)
+                .build();
     }
 
     @Override

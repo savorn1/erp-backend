@@ -65,6 +65,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final PriceGroupRepository priceGroupRepository;
     private final StockAvailabilityService stockAvailabilityService;
     private final InventorySettingsService inventorySettingsService;
+    private final ApprovalWorkflowService approvalWorkflowService;
 
     @Override
     @Transactional(readOnly = true)
@@ -204,6 +205,13 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only submitted sales orders can be approved");
         }
         List<SalesOrderLine> lines = lineRepository.findBySalesOrderId(id);
+
+        ApprovalWorkflowService.ApprovalOutcome outcome = approvalWorkflowService.recordApproval(
+                so.getCompanyId(), "SALES_ORDER", so.getId(), computeTotalAmount(lines), actingUsername);
+        if (!outcome.finalized()) {
+            return toFullResponse(so, lines);
+        }
+
         InventorySettings settings = inventorySettingsService.resolveForCompany(so.getCompanyId());
 
         for (SalesOrderLine line : lines) {
@@ -267,6 +275,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         }
         so.setStatus(SalesOrderStatus.CANCELLED);
         salesOrderRepository.save(so);
+        approvalWorkflowService.clearApprovals("SALES_ORDER", id);
         return toFullResponse(so, lineRepository.findBySalesOrderId(id));
     }
 
@@ -444,6 +453,25 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return value == null ? BigDecimal.ZERO : value;
     }
 
+    // Same computation as baseResponseBuilder's own totalAmount, kept as a
+    // standalone helper so approveSalesOrder can evaluate an ApprovalRule
+    // threshold before building a full response.
+    private BigDecimal computeTotalAmount(List<SalesOrderLine> lines) {
+        BigDecimal subtotal = BigDecimal.ZERO;
+        BigDecimal discountAmount = BigDecimal.ZERO;
+        BigDecimal taxAmount = BigDecimal.ZERO;
+        for (SalesOrderLine line : lines) {
+            BigDecimal lineSubtotal = line.getQuantityOrdered().multiply(line.getUnitPrice());
+            BigDecimal lineDiscount = lineSubtotal.multiply(nonNull(line.getDiscountPercent())).divide(HUNDRED, 4, RoundingMode.HALF_UP);
+            BigDecimal afterDiscount = lineSubtotal.subtract(lineDiscount);
+            BigDecimal lineTax = afterDiscount.multiply(nonNull(line.getTaxRate())).divide(HUNDRED, 4, RoundingMode.HALF_UP);
+            subtotal = subtotal.add(lineSubtotal);
+            discountAmount = discountAmount.add(lineDiscount);
+            taxAmount = taxAmount.add(lineTax);
+        }
+        return subtotal.subtract(discountAmount).add(taxAmount);
+    }
+
     private SalesOrderResponse.SalesOrderResponseBuilder baseResponseBuilder(
             SalesOrder so, String companyName, String customerName, String warehouseName, List<SalesOrderLine> lines) {
         BigDecimal subtotal = BigDecimal.ZERO;
@@ -462,6 +490,12 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         BigDecimal foreignTotalAmount = so.getExchangeRate() != null
                 ? totalAmount.divide(so.getExchangeRate(), 4, RoundingMode.HALF_UP)
                 : null;
+        Integer approvalsRequired = null;
+        Integer approvalsRecorded = null;
+        if (so.getStatus() == SalesOrderStatus.SUBMITTED) {
+            approvalsRequired = approvalWorkflowService.requiredApprovals(so.getCompanyId(), "SALES_ORDER", totalAmount);
+            approvalsRecorded = approvalWorkflowService.approvalsRecorded("SALES_ORDER", so.getId());
+        }
         return SalesOrderResponse.builder()
                 .id(so.getId())
                 .companyId(so.getCompanyId())
@@ -482,6 +516,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .totalAmount(totalAmount)
                 .foreignCurrency(so.getForeignCurrency())
                 .exchangeRate(so.getExchangeRate())
-                .foreignTotalAmount(foreignTotalAmount);
+                .foreignTotalAmount(foreignTotalAmount)
+                .approvalsRequired(approvalsRequired)
+                .approvalsRecorded(approvalsRecorded);
     }
 }

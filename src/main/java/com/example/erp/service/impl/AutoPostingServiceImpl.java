@@ -9,6 +9,8 @@ import com.example.erp.entity.JournalEntryStatus;
 import com.example.erp.entity.Payment;
 import com.example.erp.entity.PaymentMethod;
 import com.example.erp.entity.PaymentType;
+import com.example.erp.entity.PettyCashEntry;
+import com.example.erp.entity.PettyCashEntryType;
 import com.example.erp.entity.PostingRule;
 import com.example.erp.entity.PurchaseCreditNote;
 import com.example.erp.entity.PurchaseInvoice;
@@ -198,7 +200,7 @@ public class AutoPostingServiceImpl implements AutoPostingService {
 
         List<Line> lines = new ArrayList<>();
         if (cashAmount.signum() > 0) {
-            lines.add(new Line(rule.getDefaultCashAccountId(), cashAmount, BigDecimal.ZERO));
+            lines.add(new Line(posCashAccountId(rule), cashAmount, BigDecimal.ZERO));
         }
         if (bankAmount.signum() > 0) {
             lines.add(new Line(rule.getDefaultBankAccountId(), bankAmount, BigDecimal.ZERO));
@@ -224,14 +226,14 @@ public class AutoPostingServiceImpl implements AutoPostingService {
         List<Line> lines;
         if (variance.signum() > 0) {
             lines = List.of(
-                    new Line(rule.getDefaultCashAccountId(), variance, BigDecimal.ZERO),
+                    new Line(posCashAccountId(rule), variance, BigDecimal.ZERO),
                     new Line(rule.getCashVarianceAccountId(), BigDecimal.ZERO, variance)
             );
         } else {
             BigDecimal shortAmount = variance.negate();
             lines = List.of(
                     new Line(rule.getCashVarianceAccountId(), shortAmount, BigDecimal.ZERO),
-                    new Line(rule.getDefaultCashAccountId(), BigDecimal.ZERO, shortAmount)
+                    new Line(posCashAccountId(rule), BigDecimal.ZERO, shortAmount)
             );
         }
         createAutoEntry(companyId, date, "Cash variance", "POS_CASH_VARIANCE", sourceId, actingUsername, lines);
@@ -246,9 +248,9 @@ public class AutoPostingServiceImpl implements AutoPostingService {
 
         List<Line> lines = new ArrayList<>();
         if (cashAmount.signum() > 0) {
-            lines.add(new Line(rule.getDefaultCashAccountId(), cashAmount, BigDecimal.ZERO));
+            lines.add(new Line(posCashAccountId(rule), cashAmount, BigDecimal.ZERO));
         } else if (cashAmount.signum() < 0) {
-            lines.add(new Line(rule.getDefaultCashAccountId(), BigDecimal.ZERO, cashAmount.negate()));
+            lines.add(new Line(posCashAccountId(rule), BigDecimal.ZERO, cashAmount.negate()));
         }
         if (bankAmount.signum() > 0) {
             lines.add(new Line(rule.getDefaultBankAccountId(), bankAmount, BigDecimal.ZERO));
@@ -277,6 +279,28 @@ public class AutoPostingServiceImpl implements AutoPostingService {
 
     private Long cashOrBankAccountId(PostingRule rule, PaymentMethod method) {
         return method == PaymentMethod.CASH ? rule.getDefaultCashAccountId() : rule.getDefaultBankAccountId();
+    }
+
+    @Override
+    @Transactional
+    public void postPettyCashEntry(PettyCashEntry entry, String actingUsername) {
+        PostingRule rule = postingRuleRepository.findByCompanyId(entry.getCompanyId()).orElse(null);
+        if (rule == null || rule.getPettyCashAccountId() == null) return;
+
+        List<Line> lines = entry.getType() == PettyCashEntryType.TOPUP
+                ? List.of(new Line(rule.getPettyCashAccountId(), entry.getAmount(), BigDecimal.ZERO),
+                        new Line(entry.getAccountId(), BigDecimal.ZERO, entry.getAmount()))
+                : List.of(new Line(entry.getAccountId(), entry.getAmount(), BigDecimal.ZERO),
+                        new Line(rule.getPettyCashAccountId(), BigDecimal.ZERO, entry.getAmount()));
+
+        createAutoEntry(entry.getCompanyId(), entry.getEntryDate(), "Petty cash " + entry.getEntryNumber(),
+                "PETTY_CASH", entry.getId(), actingUsername, lines);
+    }
+
+    // POS checkout/exchange/session-variance cash side — falls back to the
+    // general cash account when a company hasn't mapped a dedicated one.
+    private Long posCashAccountId(PostingRule rule) {
+        return rule.getPosCashAccountId() != null ? rule.getPosCashAccountId() : rule.getDefaultCashAccountId();
     }
 
     @Override

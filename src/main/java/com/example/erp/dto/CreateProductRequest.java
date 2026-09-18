@@ -59,4 +59,8 @@ public class CreateProductRequest {
     // Overstock report.
     @DecimalMin(value = "0", message = "Max stock cannot be negative")
     private BigDecimal maxStock;
+
+    // Optional — months of warranty coverage from the sale date. Null means
+    // no warranty tracked.
+    private Integer warrantyMonths;
 }

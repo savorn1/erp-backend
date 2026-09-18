@@ -5,6 +5,7 @@ import com.example.erp.dto.CreateQuotationRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.QuotationFilterRequest;
 import com.example.erp.dto.QuotationResponse;
+import com.example.erp.dto.SendDocumentEmailRequest;
 import com.example.erp.dto.UpdateQuotationRequest;
 
 public interface QuotationService {
@@ -26,4 +27,6 @@ public interface QuotationService {
     QuotationResponse rejectQuotation(Long id);
 
     void deleteQuotation(Long id);
+
+    void emailQuotation(Long id, SendDocumentEmailRequest request);
 }

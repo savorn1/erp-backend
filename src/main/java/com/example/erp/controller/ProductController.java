@@ -2,6 +2,7 @@ package com.example.erp.controller;
 
 import com.example.erp.dto.ApiResponse;
 import com.example.erp.dto.CreateProductRequest;
+import com.example.erp.dto.ImportResultResponse;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.ProductFilterRequest;
 import com.example.erp.dto.ProductResponse;
@@ -21,7 +22,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/admin/products")
@@ -63,5 +66,11 @@ public class ProductController {
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
         productService.deleteProduct(id);
         return ResponseEntity.ok(ApiResponse.success("Product deleted", null));
+    }
+
+    @PostMapping(value = "/import", consumes = "multipart/form-data")
+    public ResponseEntity<ApiResponse<ImportResultResponse>> importCsv(@RequestParam("file") MultipartFile file,
+                                                                        @RequestParam("companyId") Long companyId) {
+        return ResponseEntity.ok(ApiResponse.success(productService.importProductsFromCsv(file, companyId)));
     }
 }

@@ -54,6 +54,12 @@ public class GoodsReceiptLine {
     @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal quantityReceived;
 
+    // Snapshot of the PO line's unitCost at receipt time — used by
+    // LandedCostServiceImpl to allocate freight/customs/etc. by value. Null
+    // on receipts posted before this field existed.
+    @Column(name = "unit_cost", precision = 19, scale = 4)
+    private BigDecimal unitCost;
+
     // Specific shelf/bin the received stock was placed in — optional.
     @Column(name = "bin_id")
     private Long binId;

@@ -100,4 +100,18 @@ public class PostingRule {
     // code fits this, so it's left unmapped unless the admin sets it.
     @Column(name = "cash_variance_account_id")
     private Long cashVarianceAccountId;
+
+    // POS: cash tender for checkout/exchange, and a session's over/short at
+    // close — falls back to defaultCashAccountId when unset (see
+    // AutoPostingServiceImpl.posCashAccountId).
+    @Column(name = "pos_cash_account_id")
+    private Long posCashAccountId;
+
+    // Selectable, account-only — nothing currently auto-posts here.
+    @Column(name = "petty_cash_account_id")
+    private Long pettyCashAccountId;
+
+    // Selectable, account-only — nothing currently auto-posts here.
+    @Column(name = "cash_in_transit_account_id")
+    private Long cashInTransitAccountId;
 }

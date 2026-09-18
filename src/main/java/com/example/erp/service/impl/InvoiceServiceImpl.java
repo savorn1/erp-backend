@@ -9,6 +9,7 @@ import com.example.erp.dto.InvoiceFilterRequest;
 import com.example.erp.dto.InvoiceLineResponse;
 import com.example.erp.dto.InvoiceResponse;
 import com.example.erp.dto.PageResponse;
+import com.example.erp.dto.SendDocumentEmailRequest;
 import com.example.erp.entity.BalanceAdjustmentType;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.CreditNote;
@@ -38,7 +39,10 @@ import com.example.erp.repository.SalesOrderLineRepository;
 import com.example.erp.repository.SalesOrderRepository;
 import com.example.erp.service.AutoPostingService;
 import com.example.erp.service.CustomerService;
+import com.example.erp.service.EmailService;
 import com.example.erp.service.InvoiceService;
+import com.example.erp.service.PdfRenderService;
+import com.example.erp.util.DocumentPdfHtml;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -76,6 +80,8 @@ public class InvoiceServiceImpl implements InvoiceService {
     private final CreditNoteRepository creditNoteRepository;
     private final PaymentAllocationRepository paymentAllocationRepository;
     private final AutoPostingService autoPostingService;
+    private final PdfRenderService pdfRenderService;
+    private final EmailService emailService;
 
     @Override
     @Transactional(readOnly = true)
@@ -284,6 +290,59 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
         invoiceLineRepository.deleteByInvoiceId(id);
         invoiceRepository.deleteById(id);
+    }
+
+    @Override
+    public void emailInvoice(Long id, SendDocumentEmailRequest request) {
+        InvoiceResponse invoice = getInvoice(id);
+        Customer customer = customerRepository.findById(invoice.getCustomerId()).orElse(null);
+        String to = request.getTo() != null && !request.getTo().isBlank() ? request.getTo()
+                : customer != null ? customer.getEmail() : null;
+        if (to == null || to.isBlank()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Customer has no email on file — provide one to send to");
+        }
+        Company company = companyRepository.findById(invoice.getCompanyId()).orElse(null);
+        String html = buildInvoiceHtml(company, invoice);
+        byte[] pdf = pdfRenderService.renderHtmlToPdf(html);
+
+        String subject = request.getSubject() != null && !request.getSubject().isBlank()
+                ? request.getSubject() : "Invoice " + invoice.getInvoiceNumber();
+        String body = request.getMessage() != null && !request.getMessage().isBlank()
+                ? request.getMessage() : "Please find attached invoice " + invoice.getInvoiceNumber() + ".";
+        emailService.sendWithAttachment(to, subject, body, pdf, invoice.getInvoiceNumber() + ".pdf", "application/pdf");
+    }
+
+    private String buildInvoiceHtml(Company company, InvoiceResponse invoice) {
+        String metaHtml = "Date: " + invoice.getInvoiceDate()
+                + (invoice.getDueDate() != null ? "<br/>Due: " + invoice.getDueDate() : "");
+
+        StringBuilder table = new StringBuilder();
+        table.append("<table><thead><tr><th>Product</th><th>Qty</th><th class=\"num\">Unit price</th>")
+                .append("<th class=\"num\">Tax</th><th class=\"num\">Line total</th></tr></thead><tbody>");
+        for (InvoiceLineResponse line : invoice.getLines()) {
+            table.append("<tr><td>").append(DocumentPdfHtml.escape(line.getProductName())).append("</td>")
+                    .append("<td>").append(line.getQuantity()).append("</td>")
+                    .append("<td class=\"num\">").append(line.getUnitPrice()).append("</td>")
+                    .append("<td class=\"num\">").append(line.getTaxAmount()).append("</td>")
+                    .append("<td class=\"num\">").append(line.getLineTotal()).append("</td></tr>");
+        }
+        table.append("</tbody></table>");
+
+        StringBuilder totals = new StringBuilder("<div class=\"totals\">");
+        totals.append("<div><span>Subtotal</span><span>").append(invoice.getSubtotal()).append("</span></div>");
+        if (invoice.getDiscountAmount() != null && invoice.getDiscountAmount().signum() > 0) {
+            totals.append("<div><span>Discount</span><span>-").append(invoice.getDiscountAmount()).append("</span></div>");
+        }
+        if (invoice.getTaxAmount() != null && invoice.getTaxAmount().signum() > 0) {
+            totals.append("<div><span>Tax</span><span>").append(invoice.getTaxAmount()).append("</span></div>");
+        }
+        totals.append("<div class=\"grand\"><span>Total</span><span>").append(invoice.getTotalAmount()).append("</span></div>");
+        totals.append("</div>");
+
+        String partyHtml = DocumentPdfHtml.escape(invoice.getCustomerName());
+
+        return DocumentPdfHtml.render(company, "INVOICE", invoice.getInvoiceNumber(), metaHtml,
+                "Bill to", partyHtml, table.toString(), totals.toString());
     }
 
     // Returns [subtotal, discountAmount, taxAmount, totalAmount].

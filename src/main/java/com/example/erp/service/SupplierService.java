@@ -3,6 +3,7 @@ package com.example.erp.service;
 import com.example.erp.dto.AddSupplierNoteRequest;
 import com.example.erp.dto.BalanceAdjustmentRequest;
 import com.example.erp.dto.CreateSupplierRequest;
+import com.example.erp.dto.ImportResultResponse;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.SupplierActivityFilterRequest;
 import com.example.erp.dto.SupplierActivityResponse;
@@ -10,6 +11,7 @@ import com.example.erp.dto.SupplierFilterRequest;
 import com.example.erp.dto.SupplierResponse;
 import com.example.erp.dto.UpdateSupplierRequest;
 import com.example.erp.dto.UpdateSupplierStatusRequest;
+import org.springframework.web.multipart.MultipartFile;
 
 public interface SupplierService {
 
@@ -30,4 +32,6 @@ public interface SupplierService {
     PageResponse<SupplierActivityResponse> listActivities(Long supplierId, SupplierActivityFilterRequest filter);
 
     SupplierActivityResponse addNote(Long supplierId, AddSupplierNoteRequest request, String actingUsername);
+
+    ImportResultResponse importSuppliersFromCsv(MultipartFile file, Long companyId, String actingUsername);
 }

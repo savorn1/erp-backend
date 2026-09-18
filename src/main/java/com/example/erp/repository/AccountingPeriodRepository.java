@@ -10,6 +10,7 @@ import java.util.Optional;
 
 public interface AccountingPeriodRepository extends JpaRepository<AccountingPeriod, Long>, JpaSpecificationExecutor<AccountingPeriod> {
     List<AccountingPeriod> findByFiscalYearIdOrderByPeriodNumberAsc(Long fiscalYearId);
+    List<AccountingPeriod> findByCompanyId(Long companyId);
     void deleteByFiscalYearId(Long fiscalYearId);
 
     // The period (if any) covering a given posting date for a company — used

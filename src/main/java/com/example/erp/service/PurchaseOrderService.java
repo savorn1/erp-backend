@@ -4,6 +4,7 @@ import com.example.erp.dto.CreatePurchaseOrderRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.PurchaseOrderFilterRequest;
 import com.example.erp.dto.PurchaseOrderResponse;
+import com.example.erp.dto.SendDocumentEmailRequest;
 import com.example.erp.dto.UpdatePurchaseOrderRequest;
 
 public interface PurchaseOrderService {
@@ -18,11 +19,13 @@ public interface PurchaseOrderService {
 
     PurchaseOrderResponse submitPurchaseOrder(Long id);
 
-    PurchaseOrderResponse approvePurchaseOrder(Long id);
+    PurchaseOrderResponse approvePurchaseOrder(Long id, String actingUsername);
 
     PurchaseOrderResponse sendPurchaseOrder(Long id);
 
     PurchaseOrderResponse cancelPurchaseOrder(Long id);
 
     void deletePurchaseOrder(Long id);
+
+    void emailPurchaseOrder(Long id, SendDocumentEmailRequest request);
 }

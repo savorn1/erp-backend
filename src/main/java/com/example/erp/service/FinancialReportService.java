@@ -2,6 +2,8 @@ package com.example.erp.service;
 
 import com.example.erp.dto.BalanceSheetFilterRequest;
 import com.example.erp.dto.BalanceSheetResponse;
+import com.example.erp.dto.BudgetVsActualFilterRequest;
+import com.example.erp.dto.BudgetVsActualResponse;
 import com.example.erp.dto.CashFlowFilterRequest;
 import com.example.erp.dto.CashFlowResponse;
 import com.example.erp.dto.GeneralLedgerFilterRequest;
@@ -35,4 +37,10 @@ public interface FinancialReportService {
     // period, plus profitAndLoss()'s net income for the period — no separate
     // ledger query needed (see StatementOfChangesInEquityResponse).
     StatementOfChangesInEquityResponse statementOfChangesInEquity(ProfitAndLossFilterRequest filter);
+
+    // Compares Budget rows (matched to whichever AccountingPeriods overlap
+    // the filter's date range) against the same POSTED-line actuals every
+    // other report here reads — see BudgetServiceImpl for how budgets are
+    // entered.
+    BudgetVsActualResponse budgetVsActual(BudgetVsActualFilterRequest filter);
 }

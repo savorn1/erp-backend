@@ -3,6 +3,8 @@ package com.example.erp.controller;
 import com.example.erp.dto.ApiResponse;
 import com.example.erp.dto.BalanceSheetFilterRequest;
 import com.example.erp.dto.BalanceSheetResponse;
+import com.example.erp.dto.BudgetVsActualFilterRequest;
+import com.example.erp.dto.BudgetVsActualResponse;
 import com.example.erp.dto.CashFlowFilterRequest;
 import com.example.erp.dto.CashFlowResponse;
 import com.example.erp.dto.GeneralLedgerFilterRequest;
@@ -57,5 +59,10 @@ public class FinancialReportController {
     @GetMapping("/statement-of-changes-in-equity")
     public ResponseEntity<ApiResponse<StatementOfChangesInEquityResponse>> statementOfChangesInEquity(@ModelAttribute ProfitAndLossFilterRequest filter) {
         return ResponseEntity.ok(ApiResponse.success(financialReportService.statementOfChangesInEquity(filter)));
+    }
+
+    @GetMapping("/budget-vs-actual")
+    public ResponseEntity<ApiResponse<BudgetVsActualResponse>> budgetVsActual(@ModelAttribute BudgetVsActualFilterRequest filter) {
+        return ResponseEntity.ok(ApiResponse.success(financialReportService.budgetVsActual(filter)));
     }
 }

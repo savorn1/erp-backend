@@ -50,4 +50,5 @@ public class ProductResponse {
     // Null/zero means no threshold configured — never flagged by the
     // Overstock report.
     private BigDecimal maxStock;
+    private Integer warrantyMonths;
 }

@@ -102,4 +102,10 @@ public class Product {
     // reorderPoint above; treat a null read as zero.
     @Column(name = "max_stock", precision = 19, scale = 4)
     private BigDecimal maxStock;
+
+    // Null means no warranty tracked for this product — see
+    // RmaServiceImpl's withinWarranty computation (invoiceDate +
+    // warrantyMonths vs today).
+    @Column(name = "warranty_months")
+    private Integer warrantyMonths;
 }

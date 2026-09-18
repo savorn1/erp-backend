@@ -37,5 +37,10 @@ public class SalesOrderResponse {
     // totalAmount / exchangeRate, only when both foreignCurrency and
     // exchangeRate are set — a display-only convenience, never stored.
     private BigDecimal foreignTotalAmount;
+    // Only populated while status == SUBMITTED — see
+    // ApprovalWorkflowService. Null once the order has moved past that
+    // status (or if no ApprovalRule ever applied).
+    private Integer approvalsRequired;
+    private Integer approvalsRecorded;
     private List<SalesOrderLineResponse> lines;
 }

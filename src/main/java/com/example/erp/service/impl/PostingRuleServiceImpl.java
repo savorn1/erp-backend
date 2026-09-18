@@ -49,6 +49,9 @@ public class PostingRuleServiceImpl implements PostingRuleService {
     private static final String CODE_ACCUMULATED_DEPRECIATION = "1250";
     private static final String CODE_ASSET_DISPOSAL_GAIN_LOSS = "5900";
     private static final String CODE_INVENTORY_ASSET = "1140";
+    private static final String CODE_POS_CASH = "1113";
+    private static final String CODE_PETTY_CASH = "1112";
+    private static final String CODE_CASH_IN_TRANSIT = "1114";
 
     @Override
     @Transactional(readOnly = true)
@@ -70,7 +73,8 @@ public class PostingRuleServiceImpl implements PostingRuleService {
                 request.getDefaultCashAccountId(), request.getDefaultBankAccountId(),
                 request.getFixedAssetCostAccountId(), request.getDepreciationExpenseAccountId(),
                 request.getAccumulatedDepreciationAccountId(), request.getAssetDisposalGainLossAccountId(),
-                request.getInventoryAssetAccountId(), request.getCashVarianceAccountId()
+                request.getInventoryAssetAccountId(), request.getCashVarianceAccountId(),
+                request.getPosCashAccountId(), request.getPettyCashAccountId(), request.getCashInTransitAccountId()
         ).filter(Objects::nonNull).distinct().toList();
 
         Map<Long, Account> accounts = accountRepository.findAllById(accountIds).stream()
@@ -103,6 +107,9 @@ public class PostingRuleServiceImpl implements PostingRuleService {
         rule.setAssetDisposalGainLossAccountId(request.getAssetDisposalGainLossAccountId());
         rule.setInventoryAssetAccountId(request.getInventoryAssetAccountId());
         rule.setCashVarianceAccountId(request.getCashVarianceAccountId());
+        rule.setPosCashAccountId(request.getPosCashAccountId());
+        rule.setPettyCashAccountId(request.getPettyCashAccountId());
+        rule.setCashInTransitAccountId(request.getCashInTransitAccountId());
         postingRuleRepository.save(rule);
         return toResponse(rule);
     }
@@ -133,6 +140,9 @@ public class PostingRuleServiceImpl implements PostingRuleService {
         if (rule.getAccumulatedDepreciationAccountId() == null) rule.setAccumulatedDepreciationAccountId(idFor(byCode, CODE_ACCUMULATED_DEPRECIATION));
         if (rule.getAssetDisposalGainLossAccountId() == null) rule.setAssetDisposalGainLossAccountId(idFor(byCode, CODE_ASSET_DISPOSAL_GAIN_LOSS));
         if (rule.getInventoryAssetAccountId() == null) rule.setInventoryAssetAccountId(idFor(byCode, CODE_INVENTORY_ASSET));
+        if (rule.getPosCashAccountId() == null) rule.setPosCashAccountId(idFor(byCode, CODE_POS_CASH));
+        if (rule.getPettyCashAccountId() == null) rule.setPettyCashAccountId(idFor(byCode, CODE_PETTY_CASH));
+        if (rule.getCashInTransitAccountId() == null) rule.setCashInTransitAccountId(idFor(byCode, CODE_CASH_IN_TRANSIT));
         postingRuleRepository.save(rule);
         return toResponse(rule);
     }
@@ -160,6 +170,9 @@ public class PostingRuleServiceImpl implements PostingRuleService {
         accountIds.add(rule.getAssetDisposalGainLossAccountId());
         accountIds.add(rule.getInventoryAssetAccountId());
         accountIds.add(rule.getCashVarianceAccountId());
+        accountIds.add(rule.getPosCashAccountId());
+        accountIds.add(rule.getPettyCashAccountId());
+        accountIds.add(rule.getCashInTransitAccountId());
         accountIds.removeIf(Objects::isNull);
         Map<Long, Account> accounts = accountRepository.findAllById(accountIds).stream()
                 .collect(Collectors.toMap(Account::getId, a -> a));
@@ -201,6 +214,12 @@ public class PostingRuleServiceImpl implements PostingRuleService {
                 .inventoryAssetAccountLabel(label(accounts, rule.getInventoryAssetAccountId()))
                 .cashVarianceAccountId(rule.getCashVarianceAccountId())
                 .cashVarianceAccountLabel(label(accounts, rule.getCashVarianceAccountId()))
+                .posCashAccountId(rule.getPosCashAccountId())
+                .posCashAccountLabel(label(accounts, rule.getPosCashAccountId()))
+                .pettyCashAccountId(rule.getPettyCashAccountId())
+                .pettyCashAccountLabel(label(accounts, rule.getPettyCashAccountId()))
+                .cashInTransitAccountId(rule.getCashInTransitAccountId())
+                .cashInTransitAccountLabel(label(accounts, rule.getCashInTransitAccountId()))
                 .build();
     }
 

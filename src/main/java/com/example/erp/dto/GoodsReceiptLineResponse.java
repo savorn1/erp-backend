@@ -28,6 +28,9 @@ public class GoodsReceiptLineResponse {
     // quantityReceived converted to the product's base/inventory unit —
     // what actually landed in stock once this line passed quality check.
     private BigDecimal baseQuantityReceived;
+    // Snapshot of the PO line's cost at receipt time — null on receipts
+    // posted before landed cost allocation existed.
+    private BigDecimal unitCost;
     private Long binId;
     private String binName;
     private Long batchId;

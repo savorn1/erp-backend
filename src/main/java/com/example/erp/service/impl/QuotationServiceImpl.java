@@ -7,6 +7,7 @@ import com.example.erp.dto.QuotationFilterRequest;
 import com.example.erp.dto.QuotationLineRequest;
 import com.example.erp.dto.QuotationLineResponse;
 import com.example.erp.dto.QuotationResponse;
+import com.example.erp.dto.SendDocumentEmailRequest;
 import com.example.erp.dto.UpdateQuotationRequest;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.Customer;
@@ -26,7 +27,10 @@ import com.example.erp.repository.OpportunityRepository;
 import com.example.erp.repository.ProductRepository;
 import com.example.erp.repository.QuotationLineRepository;
 import com.example.erp.repository.QuotationRepository;
+import com.example.erp.service.EmailService;
+import com.example.erp.service.PdfRenderService;
 import com.example.erp.service.QuotationService;
+import com.example.erp.util.DocumentPdfHtml;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -55,6 +59,8 @@ public class QuotationServiceImpl implements QuotationService {
     private final ProductRepository productRepository;
     private final OpportunityRepository opportunityRepository;
     private final OpportunityActivityRepository opportunityActivityRepository;
+    private final PdfRenderService pdfRenderService;
+    private final EmailService emailService;
 
     @Override
     @Transactional(readOnly = true)
@@ -254,6 +260,52 @@ public class QuotationServiceImpl implements QuotationService {
         }
         quotationLineRepository.deleteByQuotationId(id);
         quotationRepository.deleteById(id);
+    }
+
+    @Override
+    public void emailQuotation(Long id, SendDocumentEmailRequest request) {
+        QuotationResponse quotation = getQuotation(id);
+        Customer customer = quotation.getCustomerId() != null
+                ? customerRepository.findById(quotation.getCustomerId()).orElse(null) : null;
+        String to = request.getTo() != null && !request.getTo().isBlank() ? request.getTo()
+                : customer != null ? customer.getEmail() : null;
+        if (to == null || to.isBlank()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Customer has no email on file — provide one to send to");
+        }
+        Company company = companyRepository.findById(quotation.getCompanyId()).orElse(null);
+        String html = buildQuotationHtml(company, quotation);
+        byte[] pdf = pdfRenderService.renderHtmlToPdf(html);
+
+        String subject = request.getSubject() != null && !request.getSubject().isBlank()
+                ? request.getSubject() : "Quotation " + quotation.getQuotationNumber();
+        String body = request.getMessage() != null && !request.getMessage().isBlank()
+                ? request.getMessage() : "Please find attached quotation " + quotation.getQuotationNumber() + ".";
+        emailService.sendWithAttachment(to, subject, body, pdf, quotation.getQuotationNumber() + ".pdf", "application/pdf");
+    }
+
+    private String buildQuotationHtml(Company company, QuotationResponse quotation) {
+        String metaHtml = "Date: " + quotation.getQuotationDate()
+                + (quotation.getValidUntil() != null ? "<br/>Valid until: " + quotation.getValidUntil() : "");
+
+        StringBuilder table = new StringBuilder();
+        table.append("<table><thead><tr><th>Product</th><th>Qty</th><th class=\"num\">Unit price</th>")
+                .append("<th class=\"num\">Line total</th></tr></thead><tbody>");
+        for (QuotationLineResponse line : quotation.getLines()) {
+            table.append("<tr><td>").append(DocumentPdfHtml.escape(line.getProductName())).append("</td>")
+                    .append("<td>").append(line.getQuantity()).append("</td>")
+                    .append("<td class=\"num\">").append(line.getUnitPrice()).append("</td>")
+                    .append("<td class=\"num\">").append(line.getLineTotal()).append("</td></tr>");
+        }
+        table.append("</tbody></table>");
+
+        StringBuilder totals = new StringBuilder("<div class=\"totals\">");
+        totals.append("<div class=\"grand\"><span>Total</span><span>").append(quotation.getTotalAmount()).append("</span></div>");
+        totals.append("</div>");
+
+        String partyHtml = DocumentPdfHtml.escape(quotation.getCustomerName());
+
+        return DocumentPdfHtml.render(company, "QUOTATION", quotation.getQuotationNumber(), metaHtml,
+                "Prepared for", partyHtml, table.toString(), totals.toString());
     }
 
     private List<QuotationLine> saveLines(Long quotationId, List<QuotationLineRequest> requests) {

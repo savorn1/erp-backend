@@ -1,6 +1,8 @@
 package com.example.erp.service.impl;
 
 import com.example.erp.dto.CreateProductRequest;
+import com.example.erp.dto.ImportResultResponse;
+import com.example.erp.dto.ImportRowError;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.ProductFilterRequest;
 import com.example.erp.dto.ProductResponse;
@@ -26,14 +28,17 @@ import com.example.erp.repository.ProductVariantRepository;
 import com.example.erp.repository.SupplierRepository;
 import com.example.erp.repository.UnitOfMeasureRepository;
 import com.example.erp.service.ProductService;
+import com.example.erp.util.CsvUtils;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.csv.CSVRecord;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -193,9 +198,66 @@ public class ProductServiceImpl implements ProductService {
                 .imageUrl(request.getImageUrl())
                 .reorderPoint(request.getReorderPoint())
                 .maxStock(request.getMaxStock())
+                .warrantyMonths(request.getWarrantyMonths())
                 .build();
         productRepository.save(product);
         return getProduct(product.getId());
+    }
+
+    @Override
+    public ImportResultResponse importProductsFromCsv(MultipartFile file, Long companyId) {
+        requireCompany(companyId);
+        List<CSVRecord> records = CsvUtils.parse(file);
+        List<ImportRowError> errors = new ArrayList<>();
+        int successCount = 0;
+
+        for (CSVRecord record : records) {
+            int rowNumber = (int) record.getRecordNumber() + 1;
+            try {
+                CreateProductRequest request = new CreateProductRequest();
+                request.setCompanyId(companyId);
+                request.setName(CsvUtils.getRequired(record, "name"));
+                request.setSku(CsvUtils.getRequired(record, "sku"));
+                request.setBarcode(CsvUtils.getOptional(record, "barcode"));
+                request.setDescription(CsvUtils.getOptional(record, "description"));
+                request.setCategoryId(resolveByName("category", CsvUtils.getOptional(record, "category"), categoryRepository::findByNameIgnoreCase, ProductCategory::getId));
+                request.setBrandId(resolveByName("brand", CsvUtils.getOptional(record, "brand"), brandRepository::findByNameIgnoreCase, ProductBrand::getId));
+                request.setTypeId(resolveByName("type", CsvUtils.getOptional(record, "type"), typeRepository::findByNameIgnoreCase, ProductType::getId));
+                String uomName = CsvUtils.getRequired(record, "unitOfMeasure");
+                request.setUnitOfMeasureId(resolveByName("unitOfMeasure", uomName, unitOfMeasureRepository::findByNameIgnoreCase, UnitOfMeasure::getId));
+                String supplierName = CsvUtils.getOptional(record, "supplier");
+                if (supplierName != null) {
+                    Supplier supplier = supplierRepository.findByCompanyIdAndNameIgnoreCase(companyId, supplierName)
+                            .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Supplier not found: " + supplierName));
+                    request.setSupplierId(supplier.getId());
+                }
+                request.setCostPrice(CsvUtils.getRequiredDecimal(record, "costPrice"));
+                request.setSellingPrice(CsvUtils.getRequiredDecimal(record, "sellingPrice"));
+                request.setTaxRate(CsvUtils.getDecimal(record, "taxRate", BigDecimal.ZERO));
+                String trackingType = CsvUtils.getOptional(record, "trackingType");
+                request.setTrackingType(trackingType == null ? ProductTrackingType.NONE : ProductTrackingType.valueOf(trackingType.toUpperCase()));
+                request.setReorderPoint(CsvUtils.getDecimal(record, "reorderPoint", null));
+                request.setMaxStock(CsvUtils.getDecimal(record, "maxStock", null));
+
+                createProduct(request);
+                successCount++;
+            } catch (Exception e) {
+                errors.add(ImportRowError.builder().rowNumber(rowNumber).message(e.getMessage()).build());
+            }
+        }
+
+        return ImportResultResponse.builder()
+                .totalRows(records.size())
+                .successCount(successCount)
+                .failureCount(errors.size())
+                .errors(errors)
+                .build();
+    }
+
+    private <T> Long resolveByName(String fieldLabel, String name, java.util.function.Function<String, java.util.Optional<T>> lookup, java.util.function.Function<T, Long> idOf) {
+        if (name == null) return null;
+        T entity = lookup.apply(name).orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, fieldLabel + " not found: " + name));
+        return idOf.apply(entity);
     }
 
     @Override
@@ -231,6 +293,7 @@ public class ProductServiceImpl implements ProductService {
         product.setImageUrl(request.getImageUrl());
         product.setReorderPoint(request.getReorderPoint());
         product.setMaxStock(request.getMaxStock());
+        product.setWarrantyMonths(request.getWarrantyMonths());
         productRepository.save(product);
         if (!Objects.equals(oldUnitOfMeasureId, request.getUnitOfMeasureId())) {
             reconcileBaseUnitChange(product.getId(), request.getUnitOfMeasureId());
@@ -354,6 +417,7 @@ public class ProductServiceImpl implements ProductService {
                 .imageUrl(product.getImageUrl())
                 .reorderPoint(product.getReorderPoint() == null ? BigDecimal.ZERO : product.getReorderPoint())
                 .maxStock(product.getMaxStock() == null ? BigDecimal.ZERO : product.getMaxStock())
+                .warrantyMonths(product.getWarrantyMonths())
                 .build();
     }
 }

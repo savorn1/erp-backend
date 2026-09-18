@@ -61,4 +61,6 @@ public class UpdateProductRequest {
     // Overstock report.
     @DecimalMin(value = "0", message = "Max stock cannot be negative")
     private BigDecimal maxStock;
+
+    private Integer warrantyMonths;
 }

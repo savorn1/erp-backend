@@ -32,5 +32,8 @@ public class PurchaseOrderResponse {
     private BigDecimal discountAmount;
     private BigDecimal taxAmount;
     private BigDecimal totalAmount;
+    // Only populated while status == SUBMITTED — see ApprovalWorkflowService.
+    private Integer approvalsRequired;
+    private Integer approvalsRecorded;
     private List<PurchaseOrderLineResponse> lines;
 }

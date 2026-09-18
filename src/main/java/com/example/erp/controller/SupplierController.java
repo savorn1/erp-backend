@@ -4,6 +4,7 @@ import com.example.erp.dto.AddSupplierNoteRequest;
 import com.example.erp.dto.ApiResponse;
 import com.example.erp.dto.BalanceAdjustmentRequest;
 import com.example.erp.dto.CreateSupplierRequest;
+import com.example.erp.dto.ImportResultResponse;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.SupplierActivityFilterRequest;
 import com.example.erp.dto.SupplierActivityResponse;
@@ -20,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 // Admin-only supplier management. Status changes and balance adjustments are
 // attributed to the acting admin and logged as SupplierActivity entries (see
@@ -89,6 +91,14 @@ public class SupplierController {
                                                                             Authentication authentication) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Note added", supplierService.addNote(id, request, requireUsername(authentication))));
+    }
+
+    @PostMapping(value = "/import", consumes = "multipart/form-data")
+    public ResponseEntity<ApiResponse<ImportResultResponse>> importCsv(@RequestParam("file") MultipartFile file,
+                                                                        @RequestParam("companyId") Long companyId,
+                                                                        Authentication authentication) {
+        return ResponseEntity.ok(ApiResponse.success(
+                supplierService.importSuppliersFromCsv(file, companyId, requireUsername(authentication))));
     }
 
     private String requireUsername(Authentication authentication) {

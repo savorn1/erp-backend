@@ -6,6 +6,7 @@ import com.example.erp.dto.InvoiceAgingReportResponse;
 import com.example.erp.dto.InvoiceFilterRequest;
 import com.example.erp.dto.InvoiceResponse;
 import com.example.erp.dto.PageResponse;
+import com.example.erp.dto.SendDocumentEmailRequest;
 
 public interface InvoiceService {
 
@@ -26,4 +27,6 @@ public interface InvoiceService {
     InvoiceResponse cancelInvoice(Long id, String actingUsername);
 
     void deleteInvoice(Long id);
+
+    void emailInvoice(Long id, SendDocumentEmailRequest request);
 }

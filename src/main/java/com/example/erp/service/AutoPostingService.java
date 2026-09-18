@@ -4,6 +4,7 @@ import com.example.erp.entity.CreditNote;
 import com.example.erp.entity.FixedAsset;
 import com.example.erp.entity.Invoice;
 import com.example.erp.entity.Payment;
+import com.example.erp.entity.PettyCashEntry;
 import com.example.erp.entity.PurchaseCreditNote;
 import com.example.erp.entity.PurchaseInvoice;
 import com.example.erp.entity.SupplierPayment;
@@ -84,6 +85,11 @@ public interface AutoPostingService {
     // exactly zero is omitted entirely, same as postPosSale.
     void postPosExchange(Long companyId, LocalDate date, BigDecimal netRevenue, BigDecimal netTax, BigDecimal netCogs,
                           BigDecimal cashAmount, BigDecimal bankAmount, Long sourceId, String actingUsername);
+
+    // TOPUP: Dr pettyCashAccountId / Cr entry.accountId (the funding
+    // source). EXPENSE: Dr entry.accountId (the expense account) / Cr
+    // pettyCashAccountId. No-op if pettyCashAccountId isn't mapped.
+    void postPettyCashEntry(PettyCashEntry entry, String actingUsername);
 
     // Finds the auto-posted entry (if any) for this source and reverses it —
     // a POSTED entry gets a swapped-lines reversal (same as

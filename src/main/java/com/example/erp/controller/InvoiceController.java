@@ -10,6 +10,7 @@ import com.example.erp.dto.InvoiceAgingReportResponse;
 import com.example.erp.dto.InvoiceFilterRequest;
 import com.example.erp.dto.InvoiceResponse;
 import com.example.erp.dto.PageResponse;
+import com.example.erp.dto.SendDocumentEmailRequest;
 import com.example.erp.exception.AppException;
 import com.example.erp.service.CreditNoteService;
 import com.example.erp.service.InvoiceService;
@@ -95,6 +96,13 @@ public class InvoiceController {
                                                                                 Authentication authentication) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Credit note issued", creditNoteService.createCreditNote(id, request, requireUsername(authentication))));
+    }
+
+    @PostMapping("/{id}/email")
+    public ResponseEntity<ApiResponse<Void>> email(@PathVariable Long id,
+                                                    @Valid @RequestBody(required = false) SendDocumentEmailRequest request) {
+        invoiceService.emailInvoice(id, request != null ? request : new SendDocumentEmailRequest());
+        return ResponseEntity.ok(ApiResponse.success("Email sent", null));
     }
 
     private String requireUsername(Authentication authentication) {
