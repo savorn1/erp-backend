@@ -10,12 +10,15 @@ import com.example.erp.dto.NotificationSummaryResponse;
 import com.example.erp.dto.PurchaseInvoiceAgingFilterRequest;
 import com.example.erp.dto.PurchaseInvoiceAgingReportResponse;
 import com.example.erp.dto.PurchaseInvoiceAgingRowResponse;
+import com.example.erp.entity.Lead;
+import com.example.erp.entity.LeadStatus;
 import com.example.erp.entity.PurchaseOrderStatus;
 import com.example.erp.entity.PurchaseRequestStatus;
 import com.example.erp.entity.SalesOrderStatus;
 import com.example.erp.entity.StockAdjustmentStatus;
 import com.example.erp.entity.Ticket;
 import com.example.erp.entity.TicketStatus;
+import com.example.erp.repository.LeadRepository;
 import com.example.erp.repository.PurchaseOrderRepository;
 import com.example.erp.repository.PurchaseRequestRepository;
 import com.example.erp.repository.SalesOrderRepository;
@@ -44,6 +47,7 @@ public class NotificationServiceImpl implements NotificationService {
     private final PurchaseRequestRepository purchaseRequestRepository;
     private final StockAdjustmentRepository stockAdjustmentRepository;
     private final TicketRepository ticketRepository;
+    private final LeadRepository leadRepository;
 
     @Override
     public NotificationSummaryResponse getSummary() {
@@ -100,6 +104,11 @@ public class NotificationServiceImpl implements NotificationService {
                 .filter(Ticket::isOverdue)
                 .count();
         addPendingApproval(items, "OVERDUE_TICKETS", "tickets overdue", "/tickets?overdue=true", overdueTickets);
+
+        long leadsFollowUpDue = leadRepository.findByStatusNotIn(List.of(LeadStatus.WON, LeadStatus.LOST)).stream()
+                .filter(Lead::isFollowUpDue)
+                .count();
+        addPendingApproval(items, "LEADS_FOLLOW_UP_DUE", "leads due for follow-up", "/leads?followUpDue=true", leadsFollowUpDue);
 
         return NotificationSummaryResponse.builder()
                 .items(items)

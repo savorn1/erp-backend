@@ -1,6 +1,6 @@
 package com.example.erp.service.impl;
 
-import com.example.erp.dto.ConvertOpportunityToQuotationRequest;
+import com.example.erp.dto.ConvertLeadToQuotationRequest;
 import com.example.erp.dto.CreateQuotationRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.QuotationFilterRequest;
@@ -11,10 +11,10 @@ import com.example.erp.dto.SendDocumentEmailRequest;
 import com.example.erp.dto.UpdateQuotationRequest;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.Customer;
-import com.example.erp.entity.Opportunity;
-import com.example.erp.entity.OpportunityActivity;
-import com.example.erp.entity.OpportunityActivityType;
-import com.example.erp.entity.OpportunityStage;
+import com.example.erp.entity.Lead;
+import com.example.erp.entity.LeadActivity;
+import com.example.erp.entity.LeadActivityType;
+import com.example.erp.entity.LeadStatus;
 import com.example.erp.entity.Product;
 import com.example.erp.entity.Quotation;
 import com.example.erp.entity.QuotationLine;
@@ -22,8 +22,8 @@ import com.example.erp.entity.QuotationStatus;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.CompanyRepository;
 import com.example.erp.repository.CustomerRepository;
-import com.example.erp.repository.OpportunityActivityRepository;
-import com.example.erp.repository.OpportunityRepository;
+import com.example.erp.repository.LeadActivityRepository;
+import com.example.erp.repository.LeadRepository;
 import com.example.erp.repository.ProductRepository;
 import com.example.erp.repository.QuotationLineRepository;
 import com.example.erp.repository.QuotationRepository;
@@ -58,8 +58,8 @@ public class QuotationServiceImpl implements QuotationService {
     private final CompanyRepository companyRepository;
     private final CustomerRepository customerRepository;
     private final ProductRepository productRepository;
-    private final OpportunityRepository opportunityRepository;
-    private final OpportunityActivityRepository opportunityActivityRepository;
+    private final LeadRepository leadRepository;
+    private final LeadActivityRepository leadActivityRepository;
     private final PdfRenderService pdfRenderService;
     private final EmailService emailService;
 
@@ -77,6 +77,9 @@ public class QuotationServiceImpl implements QuotationService {
         if (filter.getOpportunityId() != null) {
             conditions.add((root, query, cb) -> cb.equal(root.get("opportunityId"), filter.getOpportunityId()));
         }
+        if (filter.getLeadId() != null) {
+            conditions.add((root, query, cb) -> cb.equal(root.get("leadId"), filter.getLeadId()));
+        }
         if (filter.getCustomerId() != null) {
             conditions.add((root, query, cb) -> cb.equal(root.get("customerId"), filter.getCustomerId()));
         }
@@ -92,9 +95,9 @@ public class QuotationServiceImpl implements QuotationService {
         Map<Long, String> companyNames = companyRepository.findAllById(
                 content.stream().map(Quotation::getCompanyId).distinct().toList()
         ).stream().collect(Collectors.toMap(Company::getId, Company::getName));
-        Map<Long, String> opportunityNames = opportunityRepository.findAllById(
-                content.stream().map(Quotation::getOpportunityId).filter(Objects::nonNull).distinct().toList()
-        ).stream().collect(Collectors.toMap(Opportunity::getId, Opportunity::getName));
+        Map<Long, String> leadNames = leadRepository.findAllById(
+                content.stream().map(Quotation::getLeadId).filter(Objects::nonNull).distinct().toList()
+        ).stream().collect(Collectors.toMap(Lead::getId, l -> l.getDealName() != null && !l.getDealName().isBlank() ? l.getDealName() : l.getContactName()));
         Map<Long, String> customerNames = customerRepository.findAllById(
                 content.stream().map(Quotation::getCustomerId).filter(Objects::nonNull).distinct().toList()
         ).stream().collect(Collectors.toMap(Customer::getId, Customer::getName));
@@ -104,7 +107,7 @@ public class QuotationServiceImpl implements QuotationService {
 
         return PageResponse.of(page.map(q -> toSummaryResponse(q,
                 companyNames.get(q.getCompanyId()),
-                q.getOpportunityId() == null ? null : opportunityNames.get(q.getOpportunityId()),
+                q.getLeadId() == null ? null : leadNames.get(q.getLeadId()),
                 q.getCustomerId() == null ? null : customerNames.get(q.getCustomerId()),
                 linesByQuotationId.getOrDefault(q.getId(), List.of()))));
     }
@@ -154,19 +157,19 @@ public class QuotationServiceImpl implements QuotationService {
 
     @Override
     @Transactional
-    public QuotationResponse createFromOpportunity(Long opportunityId, ConvertOpportunityToQuotationRequest request, String actingUsername) {
-        Opportunity opportunity = opportunityRepository.findById(opportunityId)
-                .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Opportunity not found with id: " + opportunityId));
-        if (opportunity.getStage() == OpportunityStage.CLOSED_WON || opportunity.getStage() == OpportunityStage.CLOSED_LOST) {
-            throw new AppException(HttpStatus.BAD_REQUEST, "Cannot create a quotation for a closed opportunity");
+    public QuotationResponse createFromLead(Long leadId, ConvertLeadToQuotationRequest request, String actingUsername) {
+        Lead lead = leadRepository.findById(leadId)
+                .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Lead not found with id: " + leadId));
+        if (lead.getStatus() == LeadStatus.WON || lead.getStatus() == LeadStatus.LOST) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Cannot create a quotation for a closed lead");
         }
-        validateLineProducts(request.getLines(), opportunity.getCompanyId());
+        validateLineProducts(request.getLines(), lead.getCompanyId());
         requireForeignCurrencyPair(request.getForeignCurrency(), request.getExchangeRate());
 
         Quotation quotation = Quotation.builder()
-                .companyId(opportunity.getCompanyId())
-                .opportunityId(opportunity.getId())
-                .customerId(opportunity.getCustomerId())
+                .companyId(lead.getCompanyId())
+                .leadId(lead.getId())
+                .customerId(lead.getCustomerId())
                 .quotationDate(request.getQuotationDate())
                 .validUntil(request.getValidUntil())
                 .notes(request.getNotes())
@@ -180,9 +183,17 @@ public class QuotationServiceImpl implements QuotationService {
 
         List<QuotationLine> lines = saveLines(quotation.getId(), request.getLines());
 
-        opportunityActivityRepository.save(OpportunityActivity.builder()
-                .opportunityId(opportunity.getId())
-                .type(OpportunityActivityType.QUOTATION_CREATED)
+        // Ordinal comparison relies on LeadStatus's declared order encoding
+        // pipeline progression — only ever advances the lead forward,
+        // never regresses one already past QUOTATION (e.g. in NEGOTIATION).
+        if (lead.getStatus().ordinal() < LeadStatus.QUOTATION.ordinal()) {
+            lead.setStatus(LeadStatus.QUOTATION);
+            leadRepository.save(lead);
+        }
+
+        leadActivityRepository.save(LeadActivity.builder()
+                .leadId(lead.getId())
+                .type(LeadActivityType.QUOTATION_CREATED)
                 .description("Quotation " + quotation.getQuotationNumber() + " created")
                 .createdBy(actingUsername)
                 .build());
@@ -357,15 +368,17 @@ public class QuotationServiceImpl implements QuotationService {
                 .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Quotation not found with id: " + id));
     }
 
-    private QuotationResponse toSummaryResponse(Quotation quotation, String companyName, String opportunityName,
+    private QuotationResponse toSummaryResponse(Quotation quotation, String companyName, String leadName,
                                                  String customerName, List<QuotationLine> lines) {
-        return baseResponseBuilder(quotation, companyName, opportunityName, customerName, lines).lines(null).build();
+        return baseResponseBuilder(quotation, companyName, leadName, customerName, lines).lines(null).build();
     }
 
     private QuotationResponse toFullResponse(Quotation quotation, List<QuotationLine> lines) {
         String companyName = companyRepository.findById(quotation.getCompanyId()).map(Company::getName).orElse(null);
-        String opportunityName = quotation.getOpportunityId() == null ? null
-                : opportunityRepository.findById(quotation.getOpportunityId()).map(Opportunity::getName).orElse(null);
+        String leadName = quotation.getLeadId() == null ? null
+                : leadRepository.findById(quotation.getLeadId())
+                        .map(l -> l.getDealName() != null && !l.getDealName().isBlank() ? l.getDealName() : l.getContactName())
+                        .orElse(null);
         String customerName = quotation.getCustomerId() == null ? null
                 : customerRepository.findById(quotation.getCustomerId()).map(Customer::getName).orElse(null);
 
@@ -388,13 +401,13 @@ public class QuotationServiceImpl implements QuotationService {
                 })
                 .toList();
 
-        return baseResponseBuilder(quotation, companyName, opportunityName, customerName, lines)
+        return baseResponseBuilder(quotation, companyName, leadName, customerName, lines)
                 .lines(lineResponses)
                 .build();
     }
 
     private QuotationResponse.QuotationResponseBuilder baseResponseBuilder(
-            Quotation quotation, String companyName, String opportunityName, String customerName, List<QuotationLine> lines) {
+            Quotation quotation, String companyName, String leadName, String customerName, List<QuotationLine> lines) {
         BigDecimal totalAmount = lines.stream()
                 .map(l -> l.getQuantity().multiply(l.getUnitPrice()))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -406,7 +419,8 @@ public class QuotationServiceImpl implements QuotationService {
                 .companyId(quotation.getCompanyId())
                 .companyName(companyName)
                 .opportunityId(quotation.getOpportunityId())
-                .opportunityName(opportunityName)
+                .leadId(quotation.getLeadId())
+                .leadName(leadName)
                 .customerId(quotation.getCustomerId())
                 .customerName(customerName)
                 .quotationNumber(quotation.getQuotationNumber())

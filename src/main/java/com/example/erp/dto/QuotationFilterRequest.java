@@ -11,6 +11,7 @@ public class QuotationFilterRequest {
     private String quotationNumber;
     private Long companyId;
     private Long opportunityId;
+    private Long leadId;
     private Long customerId;
     private QuotationStatus status;
 

@@ -1,31 +1,34 @@
 package com.example.erp.service.impl;
 
 import com.example.erp.dto.AddLeadFollowUpRequest;
+import com.example.erp.dto.AddLeadNoteRequest;
 import com.example.erp.dto.AssignLeadRequest;
+import com.example.erp.dto.CreateCustomerRequest;
 import com.example.erp.dto.CreateLeadRequest;
-import com.example.erp.dto.CreateOpportunityRequest;
 import com.example.erp.dto.LeadActivityFilterRequest;
 import com.example.erp.dto.LeadActivityResponse;
 import com.example.erp.dto.LeadFilterRequest;
 import com.example.erp.dto.LeadResponse;
+import com.example.erp.dto.LoseLeadRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.UpdateLeadRequest;
 import com.example.erp.dto.UpdateLeadStatusRequest;
 import com.example.erp.entity.Company;
+import com.example.erp.entity.Customer;
 import com.example.erp.entity.Lead;
 import com.example.erp.entity.LeadActivity;
 import com.example.erp.entity.LeadActivityType;
 import com.example.erp.entity.LeadStatus;
-import com.example.erp.entity.Opportunity;
+import com.example.erp.entity.PaymentTerms;
 import com.example.erp.entity.User;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.CompanyRepository;
+import com.example.erp.repository.CustomerRepository;
 import com.example.erp.repository.LeadActivityRepository;
 import com.example.erp.repository.LeadRepository;
-import com.example.erp.repository.OpportunityRepository;
 import com.example.erp.repository.UserRepository;
+import com.example.erp.service.CustomerService;
 import com.example.erp.service.LeadService;
-import com.example.erp.service.OpportunityService;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -35,6 +38,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,8 +54,8 @@ public class LeadServiceImpl implements LeadService {
     private final LeadActivityRepository leadActivityRepository;
     private final CompanyRepository companyRepository;
     private final UserRepository userRepository;
-    private final OpportunityRepository opportunityRepository;
-    private final OpportunityService opportunityService;
+    private final CustomerRepository customerRepository;
+    private final CustomerService customerService;
 
     @Override
     @Transactional(readOnly = true)
@@ -75,6 +79,9 @@ public class LeadServiceImpl implements LeadService {
         if (filter.getAssignedToUserId() != null) {
             conditions.add((root, query, cb) -> cb.equal(root.get("assignedToUserId"), filter.getAssignedToUserId()));
         }
+        if (filter.getCustomerId() != null) {
+            conditions.add((root, query, cb) -> cb.equal(root.get("customerId"), filter.getCustomerId()));
+        }
         Specification<Lead> spec = Specification.allOf(conditions);
         Pageable pageable = PageableUtils.of(filter.getPage(), filter.getSize(), filter.getSortBy(), filter.getSortOrder());
 
@@ -87,14 +94,14 @@ public class LeadServiceImpl implements LeadService {
         Map<Long, String> usernames = userRepository.findAllById(
                 content.stream().map(Lead::getAssignedToUserId).filter(Objects::nonNull).distinct().toList()
         ).stream().collect(Collectors.toMap(User::getId, User::getUsername));
-        Map<Long, String> opportunityNames = opportunityRepository.findAllById(
-                content.stream().map(Lead::getConvertedOpportunityId).filter(Objects::nonNull).distinct().toList()
-        ).stream().collect(Collectors.toMap(Opportunity::getId, Opportunity::getName));
+        Map<Long, String> customerNames = customerRepository.findAllById(
+                content.stream().map(Lead::getCustomerId).filter(Objects::nonNull).distinct().toList()
+        ).stream().collect(Collectors.toMap(Customer::getId, Customer::getName));
 
         return PageResponse.of(page.map(lead -> toResponse(lead,
                 companyNames.get(lead.getCompanyId()),
                 lead.getAssignedToUserId() == null ? null : usernames.get(lead.getAssignedToUserId()),
-                lead.getConvertedOpportunityId() == null ? null : opportunityNames.get(lead.getConvertedOpportunityId()))));
+                lead.getCustomerId() == null ? null : customerNames.get(lead.getCustomerId()))));
     }
 
     @Override
@@ -103,7 +110,7 @@ public class LeadServiceImpl implements LeadService {
         return toResponse(lead,
                 companyNameOf(lead.getCompanyId()),
                 lead.getAssignedToUserId() == null ? null : usernameOf(lead.getAssignedToUserId()),
-                lead.getConvertedOpportunityId() == null ? null : opportunityNameOf(lead.getConvertedOpportunityId()));
+                lead.getCustomerId() == null ? null : customerNameOf(lead.getCustomerId()));
     }
 
     @Override
@@ -112,6 +119,9 @@ public class LeadServiceImpl implements LeadService {
         requireCompany(request.getCompanyId());
         if (request.getAssignedToUserId() != null) {
             requireUser(request.getAssignedToUserId(), request.getCompanyId());
+        }
+        if (request.getCustomerId() != null) {
+            requireCustomer(request.getCustomerId(), request.getCompanyId());
         }
 
         Lead lead = Lead.builder()
@@ -124,6 +134,11 @@ public class LeadServiceImpl implements LeadService {
                 .assignedToUserId(request.getAssignedToUserId())
                 .estimatedValue(request.getEstimatedValue())
                 .notes(request.getNotes())
+                .dealName(request.getDealName())
+                .amount(request.getAmount())
+                .probability(request.getProbability())
+                .expectedCloseDate(request.getExpectedCloseDate())
+                .customerId(request.getCustomerId())
                 .createdBy(actingUsername)
                 .build();
         leadRepository.save(lead);
@@ -141,7 +156,11 @@ public class LeadServiceImpl implements LeadService {
     @Transactional
     public LeadResponse updateLead(Long id, UpdateLeadRequest request) {
         Lead lead = find(id);
+        requireOpen(lead);
         requireCompany(request.getCompanyId());
+        if (request.getCustomerId() != null) {
+            requireCustomer(request.getCustomerId(), request.getCompanyId());
+        }
 
         lead.setCompanyId(request.getCompanyId());
         lead.setContactName(request.getContactName());
@@ -151,6 +170,11 @@ public class LeadServiceImpl implements LeadService {
         lead.setSource(request.getSource());
         lead.setEstimatedValue(request.getEstimatedValue());
         lead.setNotes(request.getNotes());
+        lead.setDealName(request.getDealName());
+        lead.setAmount(request.getAmount());
+        lead.setProbability(request.getProbability());
+        lead.setExpectedCloseDate(request.getExpectedCloseDate());
+        lead.setCustomerId(request.getCustomerId());
         leadRepository.save(lead);
         return getLead(id);
     }
@@ -159,11 +183,9 @@ public class LeadServiceImpl implements LeadService {
     @Transactional
     public LeadResponse updateStatus(Long id, UpdateLeadStatusRequest request, String actingUsername) {
         Lead lead = find(id);
-        if (lead.getStatus() == LeadStatus.CONVERTED) {
-            throw new AppException(HttpStatus.BAD_REQUEST, "A converted lead's status cannot be changed further");
-        }
-        if (request.getStatus() == LeadStatus.CONVERTED) {
-            throw new AppException(HttpStatus.BAD_REQUEST, "Use the convert endpoint to convert a lead");
+        requireOpen(lead);
+        if (request.getStatus() == LeadStatus.WON || request.getStatus() == LeadStatus.LOST) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Use the win/lose endpoints to close a lead");
         }
         LeadStatus previous = lead.getStatus();
         lead.setStatus(request.getStatus());
@@ -194,38 +216,49 @@ public class LeadServiceImpl implements LeadService {
 
     @Override
     @Transactional
-    public LeadResponse convertLead(Long id, String actingUsername) {
+    public LeadResponse winLead(Long id, String actingUsername) {
         Lead lead = find(id);
-        if (lead.getStatus() == LeadStatus.CONVERTED) {
-            throw new AppException(HttpStatus.BAD_REQUEST, "Lead has already been converted");
-        }
-        if (lead.getStatus() != LeadStatus.QUALIFIED && lead.getStatus() != LeadStatus.PROPOSAL
-                && lead.getStatus() != LeadStatus.NEGOTIATION) {
-            throw new AppException(HttpStatus.BAD_REQUEST, "Lead must be qualified before it can be converted to an opportunity");
+        requireOpen(lead);
+
+        if (lead.getCustomerId() == null) {
+            CreateCustomerRequest customerRequest = new CreateCustomerRequest();
+            customerRequest.setCompanyId(lead.getCompanyId());
+            customerRequest.setName(lead.getDealName() != null && !lead.getDealName().isBlank() ? lead.getDealName() : lead.getContactName());
+            customerRequest.setCreditLimit(BigDecimal.ZERO);
+            customerRequest.setPaymentTerms(PaymentTerms.NET_30);
+            var customer = customerService.createCustomer(customerRequest, actingUsername);
+            lead.setCustomerId(customer.getId());
         }
 
-        CreateOpportunityRequest opportunityRequest = new CreateOpportunityRequest();
-        opportunityRequest.setCompanyId(lead.getCompanyId());
-        opportunityRequest.setLeadId(lead.getId());
-        opportunityRequest.setName(lead.getOrganizationName() != null && !lead.getOrganizationName().isBlank()
-                ? lead.getOrganizationName() : lead.getContactName());
-        opportunityRequest.setAmount(lead.getEstimatedValue());
-        opportunityRequest.setAssignedToUserId(lead.getAssignedToUserId());
-        var opportunity = opportunityService.createOpportunity(opportunityRequest, actingUsername);
-
-        lead.setStatus(LeadStatus.CONVERTED);
-        lead.setConvertedOpportunityId(opportunity.getId());
-        lead.setConvertedAt(LocalDateTime.now());
+        lead.setStatus(LeadStatus.WON);
+        lead.setClosedAt(LocalDateTime.now());
         leadRepository.save(lead);
 
-        recordActivity(id, LeadActivityType.CONVERTED, "Converted to opportunity " + opportunity.getName(), actingUsername);
+        String customerName = customerNameOf(lead.getCustomerId());
+        recordActivity(id, LeadActivityType.WON, "Won — customer " + customerName, actingUsername);
+        return getLead(id);
+    }
+
+    @Override
+    @Transactional
+    public LeadResponse loseLead(Long id, LoseLeadRequest request, String actingUsername) {
+        Lead lead = find(id);
+        requireOpen(lead);
+
+        lead.setStatus(LeadStatus.LOST);
+        lead.setClosedAt(LocalDateTime.now());
+        leadRepository.save(lead);
+
+        String description = "Lost" + (request.getReason() != null && !request.getReason().isBlank() ? " — " + request.getReason() : "");
+        recordActivity(id, LeadActivityType.LOST, description, actingUsername);
         return getLead(id);
     }
 
     @Override
     @Transactional
     public void deleteLead(Long id) {
-        find(id);
+        Lead lead = find(id);
+        requireOpen(lead);
         leadRepository.deleteById(id);
     }
 
@@ -240,10 +273,26 @@ public class LeadServiceImpl implements LeadService {
 
     @Override
     @Transactional
-    public LeadActivityResponse addFollowUp(Long leadId, AddLeadFollowUpRequest request, String actingUsername) {
+    public LeadActivityResponse addNote(Long leadId, AddLeadNoteRequest request, String actingUsername) {
         find(leadId);
+        LeadActivity activity = recordActivity(leadId, LeadActivityType.NOTE, request.getDescription(), actingUsername);
+        return toActivityResponse(activity);
+    }
+
+    @Override
+    @Transactional
+    public LeadActivityResponse addFollowUp(Long leadId, AddLeadFollowUpRequest request, String actingUsername) {
+        Lead lead = find(leadId);
+        lead.setNextFollowUpDate(request.getNextFollowUpDate());
+        leadRepository.save(lead);
         LeadActivity activity = recordActivity(leadId, LeadActivityType.FOLLOW_UP, request.getDescription(), actingUsername);
         return toActivityResponse(activity);
+    }
+
+    private void requireOpen(Lead lead) {
+        if (lead.getStatus() == LeadStatus.WON || lead.getStatus() == LeadStatus.LOST) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "This lead is already closed");
+        }
     }
 
     private LeadActivity recordActivity(Long leadId, LeadActivityType type, String description, String actingUsername) {
@@ -259,6 +308,14 @@ public class LeadServiceImpl implements LeadService {
     private Company requireCompany(Long companyId) {
         return companyRepository.findById(companyId)
                 .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Company not found with id: " + companyId));
+    }
+
+    private void requireCustomer(Long customerId, Long companyId) {
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Customer not found with id: " + customerId));
+        if (!customer.getCompanyId().equals(companyId)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Customer does not belong to the selected company");
+        }
     }
 
     // A null User.companyId means a global/unscoped user (e.g. an admin not
@@ -280,8 +337,8 @@ public class LeadServiceImpl implements LeadService {
         return userRepository.findById(userId).map(User::getUsername).orElse(null);
     }
 
-    private String opportunityNameOf(Long opportunityId) {
-        return opportunityRepository.findById(opportunityId).map(Opportunity::getName).orElse(null);
+    private String customerNameOf(Long customerId) {
+        return customerRepository.findById(customerId).map(Customer::getName).orElse(null);
     }
 
     private Lead find(Long id) {
@@ -289,7 +346,7 @@ public class LeadServiceImpl implements LeadService {
                 .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Lead not found with id: " + id));
     }
 
-    private LeadResponse toResponse(Lead lead, String companyName, String assignedToUsername, String convertedOpportunityName) {
+    private LeadResponse toResponse(Lead lead, String companyName, String assignedToUsername, String customerName) {
         return LeadResponse.builder()
                 .id(lead.getId())
                 .companyId(lead.getCompanyId())
@@ -304,10 +361,16 @@ public class LeadServiceImpl implements LeadService {
                 .assignedToUsername(assignedToUsername)
                 .estimatedValue(lead.getEstimatedValue())
                 .notes(lead.getNotes())
-                .convertedOpportunityId(lead.getConvertedOpportunityId())
-                .convertedOpportunityName(convertedOpportunityName)
-                .convertedAt(lead.getConvertedAt())
                 .createdBy(lead.getCreatedBy())
+                .nextFollowUpDate(lead.getNextFollowUpDate())
+                .followUpDue(lead.isFollowUpDue())
+                .dealName(lead.getDealName())
+                .amount(lead.getAmount())
+                .probability(lead.getProbability())
+                .expectedCloseDate(lead.getExpectedCloseDate())
+                .customerId(lead.getCustomerId())
+                .customerName(customerName)
+                .closedAt(lead.getClosedAt())
                 .build();
     }
 

@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -27,8 +28,16 @@ public class LeadResponse {
     private String assignedToUsername;
     private BigDecimal estimatedValue;
     private String notes;
-    private Long convertedOpportunityId;
-    private String convertedOpportunityName;
-    private LocalDateTime convertedAt;
     private String createdBy;
+    private LocalDate nextFollowUpDate;
+    private boolean followUpDue;
+
+    // ── Deal-specific fields, absorbed from the old Opportunity entity ──
+    private String dealName;
+    private BigDecimal amount;
+    private Integer probability;
+    private LocalDate expectedCloseDate;
+    private Long customerId;
+    private String customerName;
+    private LocalDateTime closedAt;
 }

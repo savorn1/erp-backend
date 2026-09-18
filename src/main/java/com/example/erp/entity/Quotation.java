@@ -39,8 +39,16 @@ public class Quotation {
     @Column(name = "company_id", nullable = false)
     private Long companyId;
 
+    // Legacy — predates the Lead/Opportunity merge (see
+    // LeadOpportunityMergeMigration). Left in place, unwritten by any
+    // current code; leadId below is the live linkage.
     @Column(name = "opportunity_id")
     private Long opportunityId;
+
+    // Set when this quotation was created from a Lead (see
+    // LeadServiceImpl.convertToQuotation / QuotationServiceImpl.createFromLead).
+    @Column(name = "lead_id")
+    private Long leadId;
 
     @Column(name = "customer_id")
     private Long customerId;

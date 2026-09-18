@@ -21,7 +21,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 // Admin-only quotation management. Quotations are normally created via
-// OpportunityController.convertToQuotation, but can also stand alone.
+// LeadController.convertToQuotation, but can also stand alone.
 @RestController
 @RequestMapping("/api/admin/quotations")
 @RequiredArgsConstructor

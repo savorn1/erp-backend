@@ -13,7 +13,7 @@ import com.example.erp.entity.Company;
 import com.example.erp.entity.Customer;
 import com.example.erp.entity.CustomerGroup;
 import com.example.erp.entity.InventorySettings;
-import com.example.erp.entity.Opportunity;
+import com.example.erp.entity.Lead;
 import com.example.erp.entity.PriceGroup;
 import com.example.erp.entity.Product;
 import com.example.erp.entity.Quotation;
@@ -29,7 +29,7 @@ import com.example.erp.exception.AppException;
 import com.example.erp.repository.CompanyRepository;
 import com.example.erp.repository.CustomerGroupRepository;
 import com.example.erp.repository.CustomerRepository;
-import com.example.erp.repository.OpportunityRepository;
+import com.example.erp.repository.LeadRepository;
 import com.example.erp.repository.PriceGroupRepository;
 import com.example.erp.repository.ProductPriceRepository;
 import com.example.erp.repository.ProductRepository;
@@ -83,7 +83,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final ApprovalWorkflowService approvalWorkflowService;
     private final QuotationRepository quotationRepository;
     private final QuotationLineRepository quotationLineRepository;
-    private final OpportunityRepository opportunityRepository;
+    private final LeadRepository leadRepository;
     private final UserRepository userRepository;
     private final PdfRenderService pdfRenderService;
     private final EmailService emailService;
@@ -175,7 +175,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return toFullResponse(so, lines);
     }
 
-    // Mirrors QuotationServiceImpl.createFromOpportunity one hop further down
+    // Mirrors QuotationServiceImpl.createFromLead one hop further down
     // the pipeline — the one conversion this codebase was missing. Lives here
     // (not on QuotationService) so the target document's own service owns its
     // own construction, same as createSalesOrder itself; QuotationController
@@ -201,9 +201,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         }
 
         Long salesRepUserId = request.getSalesRepUserId();
-        if (salesRepUserId == null && quotation.getOpportunityId() != null) {
-            salesRepUserId = opportunityRepository.findById(quotation.getOpportunityId())
-                    .map(Opportunity::getAssignedToUserId)
+        if (salesRepUserId == null && quotation.getLeadId() != null) {
+            salesRepUserId = leadRepository.findById(quotation.getLeadId())
+                    .map(Lead::getAssignedToUserId)
                     .orElse(null);
         }
         if (salesRepUserId != null) {
@@ -570,7 +570,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         }
     }
 
-    // Mirrors LeadServiceImpl/OpportunityServiceImpl's identical company-scoping
+    // Mirrors LeadServiceImpl's company-scoping
     // guard for assignedToUserId — null companyId on the user means unscoped
     // (always allowed).
     private void requireSalesRep(Long userId, Long companyId) {

@@ -1,18 +1,23 @@
 package com.example.erp.controller;
 
 import com.example.erp.dto.AddLeadFollowUpRequest;
+import com.example.erp.dto.AddLeadNoteRequest;
 import com.example.erp.dto.ApiResponse;
 import com.example.erp.dto.AssignLeadRequest;
+import com.example.erp.dto.ConvertLeadToQuotationRequest;
 import com.example.erp.dto.CreateLeadRequest;
 import com.example.erp.dto.LeadActivityFilterRequest;
 import com.example.erp.dto.LeadActivityResponse;
 import com.example.erp.dto.LeadFilterRequest;
 import com.example.erp.dto.LeadResponse;
+import com.example.erp.dto.LoseLeadRequest;
 import com.example.erp.dto.PageResponse;
+import com.example.erp.dto.QuotationResponse;
 import com.example.erp.dto.UpdateLeadRequest;
 import com.example.erp.dto.UpdateLeadStatusRequest;
 import com.example.erp.exception.AppException;
 import com.example.erp.service.LeadService;
+import com.example.erp.service.QuotationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -21,9 +26,11 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-// Admin-only lead management. Status changes, assignment, follow-ups, and
-// conversion are attributed to the acting admin and logged as LeadActivity
-// entries (see GET .../{id}/activities).
+// Admin-only lead management — covers the whole pipeline from a fresh
+// contact through to a closed deal (formerly split across a separate Lead
+// and Opportunity; see LeadOpportunityMergeMigration). Status changes,
+// assignment, wins/losses, notes, and follow-ups are all logged as
+// LeadActivity entries (see GET .../{id}/activities).
 @RestController
 @RequestMapping("/api/admin/leads")
 @RequiredArgsConstructor
@@ -31,6 +38,7 @@ import org.springframework.web.bind.annotation.*;
 public class LeadController {
 
     private final LeadService leadService;
+    private final QuotationService quotationService;
 
     @GetMapping
     public ResponseEntity<PageResponse<LeadResponse>> list(@ModelAttribute LeadFilterRequest filter) {
@@ -70,10 +78,18 @@ public class LeadController {
                 leadService.assignSalesperson(id, request, requireUsername(authentication))));
     }
 
-    @PostMapping("/{id}/convert")
-    public ResponseEntity<ApiResponse<LeadResponse>> convert(@PathVariable Long id, Authentication authentication) {
-        return ResponseEntity.ok(ApiResponse.success("Lead converted to customer",
-                leadService.convertLead(id, requireUsername(authentication))));
+    @PostMapping("/{id}/win")
+    public ResponseEntity<ApiResponse<LeadResponse>> win(@PathVariable Long id, Authentication authentication) {
+        return ResponseEntity.ok(ApiResponse.success("Lead won",
+                leadService.winLead(id, requireUsername(authentication))));
+    }
+
+    @PostMapping("/{id}/lose")
+    public ResponseEntity<ApiResponse<LeadResponse>> lose(@PathVariable Long id,
+                                                              @RequestBody(required = false) LoseLeadRequest request,
+                                                              Authentication authentication) {
+        return ResponseEntity.ok(ApiResponse.success("Lead lost",
+                leadService.loseLead(id, request == null ? new LoseLeadRequest() : request, requireUsername(authentication))));
     }
 
     @DeleteMapping("/{id}")
@@ -88,12 +104,28 @@ public class LeadController {
         return ResponseEntity.ok(leadService.listActivities(id, filter));
     }
 
-    @PostMapping("/{id}/activities")
+    @PostMapping("/{id}/notes")
+    public ResponseEntity<ApiResponse<LeadActivityResponse>> addNote(@PathVariable Long id,
+                                                                         @Valid @RequestBody AddLeadNoteRequest request,
+                                                                         Authentication authentication) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Note added", leadService.addNote(id, request, requireUsername(authentication))));
+    }
+
+    @PostMapping("/{id}/follow-ups")
     public ResponseEntity<ApiResponse<LeadActivityResponse>> addFollowUp(@PathVariable Long id,
                                                                              @Valid @RequestBody AddLeadFollowUpRequest request,
                                                                              Authentication authentication) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Follow-up added", leadService.addFollowUp(id, request, requireUsername(authentication))));
+    }
+
+    @PostMapping("/{id}/convert-to-quotation")
+    public ResponseEntity<ApiResponse<QuotationResponse>> convertToQuotation(@PathVariable Long id,
+                                                                                 @Valid @RequestBody ConvertLeadToQuotationRequest request,
+                                                                                 Authentication authentication) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Quotation created", quotationService.createFromLead(id, request, requireUsername(authentication))));
     }
 
     private String requireUsername(Authentication authentication) {

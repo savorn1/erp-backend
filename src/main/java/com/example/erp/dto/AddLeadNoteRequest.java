@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 @Data
-public class AddOpportunityFollowUpRequest {
+public class AddLeadNoteRequest {
 
     @NotBlank
     private String description;

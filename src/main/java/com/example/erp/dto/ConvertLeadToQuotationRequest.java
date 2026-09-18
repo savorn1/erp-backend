@@ -10,7 +10,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Data
-public class ConvertOpportunityToQuotationRequest {
+public class ConvertLeadToQuotationRequest {
 
     @NotNull
     private LocalDate quotationDate;

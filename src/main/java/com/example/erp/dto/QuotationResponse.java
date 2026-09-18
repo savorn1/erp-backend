@@ -18,8 +18,11 @@ public class QuotationResponse {
     private Long id;
     private Long companyId;
     private String companyName;
+    // Legacy — see Quotation.opportunityId's comment. leadId is the live linkage.
     private Long opportunityId;
     private String opportunityName;
+    private Long leadId;
+    private String leadName;
     private Long customerId;
     private String customerName;
     private String quotationNumber;

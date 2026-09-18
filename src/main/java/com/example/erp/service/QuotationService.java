@@ -1,6 +1,6 @@
 package com.example.erp.service;
 
-import com.example.erp.dto.ConvertOpportunityToQuotationRequest;
+import com.example.erp.dto.ConvertLeadToQuotationRequest;
 import com.example.erp.dto.CreateQuotationRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.QuotationFilterRequest;
@@ -16,7 +16,7 @@ public interface QuotationService {
 
     QuotationResponse createQuotation(CreateQuotationRequest request, String actingUsername);
 
-    QuotationResponse createFromOpportunity(Long opportunityId, ConvertOpportunityToQuotationRequest request, String actingUsername);
+    QuotationResponse createFromLead(Long leadId, ConvertLeadToQuotationRequest request, String actingUsername);
 
     QuotationResponse updateQuotation(Long id, UpdateQuotationRequest request);
 

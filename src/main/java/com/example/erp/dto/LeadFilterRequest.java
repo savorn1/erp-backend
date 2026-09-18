@@ -15,6 +15,7 @@ public class LeadFilterRequest {
     private LeadStatus status;
     private LeadSource source;
     private Long assignedToUserId;
+    private Long customerId;
 
     private String sortBy = "id";
     private String sortOrder = "desc";
