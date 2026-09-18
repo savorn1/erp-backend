@@ -13,6 +13,7 @@ import com.example.erp.entity.Company;
 import com.example.erp.entity.Customer;
 import com.example.erp.entity.CustomerGroup;
 import com.example.erp.entity.InventorySettings;
+import com.example.erp.entity.Opportunity;
 import com.example.erp.entity.PriceGroup;
 import com.example.erp.entity.Product;
 import com.example.erp.entity.Quotation;
@@ -22,11 +23,13 @@ import com.example.erp.entity.SalesOrder;
 import com.example.erp.entity.SalesOrderLine;
 import com.example.erp.entity.SalesOrderStatus;
 import com.example.erp.entity.StockLevel;
+import com.example.erp.entity.User;
 import com.example.erp.entity.Warehouse;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.CompanyRepository;
 import com.example.erp.repository.CustomerGroupRepository;
 import com.example.erp.repository.CustomerRepository;
+import com.example.erp.repository.OpportunityRepository;
 import com.example.erp.repository.PriceGroupRepository;
 import com.example.erp.repository.ProductPriceRepository;
 import com.example.erp.repository.ProductRepository;
@@ -35,6 +38,7 @@ import com.example.erp.repository.QuotationRepository;
 import com.example.erp.repository.SalesOrderLineRepository;
 import com.example.erp.repository.SalesOrderRepository;
 import com.example.erp.repository.StockLevelRepository;
+import com.example.erp.repository.UserRepository;
 import com.example.erp.repository.WarehouseRepository;
 import com.example.erp.service.EmailService;
 import com.example.erp.service.InventorySettingsService;
@@ -79,6 +83,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final ApprovalWorkflowService approvalWorkflowService;
     private final QuotationRepository quotationRepository;
     private final QuotationLineRepository quotationLineRepository;
+    private final OpportunityRepository opportunityRepository;
+    private final UserRepository userRepository;
     private final PdfRenderService pdfRenderService;
     private final EmailService emailService;
 
@@ -144,6 +150,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         requireCustomer(request.getCustomerId(), request.getCompanyId());
         requireWarehouse(request.getWarehouseId(), request.getCompanyId());
         validateLineProducts(request.getLines(), request.getCompanyId());
+        if (request.getSalesRepUserId() != null) {
+            requireSalesRep(request.getSalesRepUserId(), request.getCompanyId());
+        }
 
         requireForeignCurrencyPair(request.getForeignCurrency(), request.getExchangeRate());
         SalesOrder so = SalesOrder.builder()
@@ -153,6 +162,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .orderDate(request.getOrderDate())
                 .expectedDate(request.getExpectedDate())
                 .notes(request.getNotes())
+                .salesRepUserId(request.getSalesRepUserId())
                 .foreignCurrency(request.getForeignCurrency())
                 .exchangeRate(request.getExchangeRate())
                 .createdBy(actingUsername)
@@ -190,6 +200,16 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             throw new AppException(HttpStatus.BAD_REQUEST, "Quotation has no lines to convert");
         }
 
+        Long salesRepUserId = request.getSalesRepUserId();
+        if (salesRepUserId == null && quotation.getOpportunityId() != null) {
+            salesRepUserId = opportunityRepository.findById(quotation.getOpportunityId())
+                    .map(Opportunity::getAssignedToUserId)
+                    .orElse(null);
+        }
+        if (salesRepUserId != null) {
+            requireSalesRep(salesRepUserId, quotation.getCompanyId());
+        }
+
         SalesOrder so = SalesOrder.builder()
                 .companyId(quotation.getCompanyId())
                 .customerId(quotation.getCustomerId())
@@ -197,6 +217,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .warehouseId(request.getWarehouseId())
                 .orderDate(request.getOrderDate())
                 .expectedDate(request.getExpectedDate())
+                .salesRepUserId(salesRepUserId)
                 .foreignCurrency(quotation.getForeignCurrency())
                 .exchangeRate(quotation.getExchangeRate())
                 .createdBy(actingUsername)
@@ -229,6 +250,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         requireCustomer(request.getCustomerId(), request.getCompanyId());
         requireWarehouse(request.getWarehouseId(), request.getCompanyId());
         validateLineProducts(request.getLines(), request.getCompanyId());
+        if (request.getSalesRepUserId() != null) {
+            requireSalesRep(request.getSalesRepUserId(), request.getCompanyId());
+        }
         requireForeignCurrencyPair(request.getForeignCurrency(), request.getExchangeRate());
 
         so.setCompanyId(request.getCompanyId());
@@ -237,6 +261,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         so.setOrderDate(request.getOrderDate());
         so.setExpectedDate(request.getExpectedDate());
         so.setNotes(request.getNotes());
+        so.setSalesRepUserId(request.getSalesRepUserId());
         so.setForeignCurrency(request.getForeignCurrency());
         so.setExchangeRate(request.getExchangeRate());
         salesOrderRepository.save(so);
@@ -545,6 +570,17 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         }
     }
 
+    // Mirrors LeadServiceImpl/OpportunityServiceImpl's identical company-scoping
+    // guard for assignedToUserId — null companyId on the user means unscoped
+    // (always allowed).
+    private void requireSalesRep(Long userId, Long companyId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "User not found with id: " + userId));
+        if (user.getCompanyId() != null && !user.getCompanyId().equals(companyId)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Sales rep does not belong to the selected company");
+        }
+    }
+
     private SalesOrder find(Long id) {
         return salesOrderRepository.findById(id)
                 .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Sales order not found with id: " + id));
@@ -648,6 +684,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             approvalsRequired = approvalWorkflowService.requiredApprovals(so.getCompanyId(), "SALES_ORDER", totalAmount);
             approvalsRecorded = approvalWorkflowService.approvalsRecorded("SALES_ORDER", so.getId());
         }
+        String salesRepName = so.getSalesRepUserId() == null ? null
+                : userRepository.findById(so.getSalesRepUserId()).map(User::getUsername).orElse(null);
         return SalesOrderResponse.builder()
                 .id(so.getId())
                 .companyId(so.getCompanyId())
@@ -663,6 +701,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .status(so.getStatus().name())
                 .notes(so.getNotes())
                 .createdBy(so.getCreatedBy())
+                .salesRepUserId(so.getSalesRepUserId())
+                .salesRepName(salesRepName)
                 .subtotal(subtotal)
                 .discountAmount(discountAmount)
                 .taxAmount(taxAmount)

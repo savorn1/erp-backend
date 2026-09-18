@@ -30,6 +30,8 @@ public class SalesOrderResponse {
     private String status;
     private String notes;
     private String createdBy;
+    private Long salesRepUserId;
+    private String salesRepName;
     private BigDecimal subtotal;
     private BigDecimal discountAmount;
     private BigDecimal taxAmount;

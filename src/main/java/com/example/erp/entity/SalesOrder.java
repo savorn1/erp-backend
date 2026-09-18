@@ -79,4 +79,12 @@ public class SalesOrder {
     // SalesOrderServiceImpl.
     @Column(name = "exchange_rate", precision = 19, scale = 6)
     private BigDecimal exchangeRate;
+
+    // The salesperson credited with this order for commission purposes — see
+    // CommissionRule/CommissionEntry and PaymentServiceImpl's commission
+    // posting on payment. Null means no commission is tracked for this
+    // order. Distinct from createdBy, which is whoever entered the record
+    // and may not be the actual salesperson.
+    @Column(name = "sales_rep_user_id")
+    private Long salesRepUserId;
 }

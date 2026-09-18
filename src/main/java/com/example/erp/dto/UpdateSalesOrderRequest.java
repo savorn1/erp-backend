@@ -29,6 +29,8 @@ public class UpdateSalesOrderRequest {
 
     private String notes;
 
+    private Long salesRepUserId;
+
     private String foreignCurrency;
     private BigDecimal exchangeRate;
 

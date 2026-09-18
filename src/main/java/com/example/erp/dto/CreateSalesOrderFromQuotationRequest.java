@@ -17,4 +17,9 @@ public class CreateSalesOrderFromQuotationRequest {
     private LocalDate orderDate;
 
     private LocalDate expectedDate;
+
+    // Optional override — see SalesOrder.salesRepUserId. When omitted,
+    // SalesOrderServiceImpl defaults it to the source Quotation's linked
+    // Opportunity's assignedToUserId, if any.
+    private Long salesRepUserId;
 }

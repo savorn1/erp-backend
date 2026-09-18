@@ -9,6 +9,8 @@ import com.example.erp.dto.PaymentFilterRequest;
 import com.example.erp.dto.PaymentResponse;
 import com.example.erp.dto.RefundPaymentRequest;
 import com.example.erp.entity.BalanceAdjustmentType;
+import com.example.erp.entity.CommissionEntry;
+import com.example.erp.entity.CommissionRule;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.CreditNote;
 import com.example.erp.entity.Customer;
@@ -18,7 +20,10 @@ import com.example.erp.entity.InvoiceStatus;
 import com.example.erp.entity.Payment;
 import com.example.erp.entity.PaymentAllocation;
 import com.example.erp.entity.PaymentType;
+import com.example.erp.entity.SalesOrder;
 import com.example.erp.exception.AppException;
+import com.example.erp.repository.CommissionEntryRepository;
+import com.example.erp.repository.CommissionRuleRepository;
 import com.example.erp.repository.CompanyRepository;
 import com.example.erp.repository.CreditNoteRepository;
 import com.example.erp.repository.CustomerRepository;
@@ -26,6 +31,7 @@ import com.example.erp.repository.InvoiceLineRepository;
 import com.example.erp.repository.InvoiceRepository;
 import com.example.erp.repository.PaymentAllocationRepository;
 import com.example.erp.repository.PaymentRepository;
+import com.example.erp.repository.SalesOrderRepository;
 import com.example.erp.service.AutoPostingService;
 import com.example.erp.service.CustomerService;
 import com.example.erp.service.PaymentService;
@@ -61,6 +67,9 @@ public class PaymentServiceImpl implements PaymentService {
     private final InvoiceLineRepository invoiceLineRepository;
     private final CreditNoteRepository creditNoteRepository;
     private final AutoPostingService autoPostingService;
+    private final SalesOrderRepository salesOrderRepository;
+    private final CommissionRuleRepository commissionRuleRepository;
+    private final CommissionEntryRepository commissionEntryRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -135,13 +144,16 @@ public class PaymentServiceImpl implements PaymentService {
         payment.setPaymentNumber("PAY-" + String.format("%06d", payment.getId()));
         paymentRepository.save(payment);
 
+        List<PaymentAllocation> allocations = new ArrayList<>();
         for (PaymentAllocationRequest allocationRequest : request.getAllocations()) {
-            paymentAllocationRepository.save(PaymentAllocation.builder()
+            PaymentAllocation allocation = paymentAllocationRepository.save(PaymentAllocation.builder()
                     .paymentId(payment.getId())
                     .invoiceId(allocationRequest.getInvoiceId())
                     .amount(allocationRequest.getAmount())
                     .build());
+            allocations.add(allocation);
         }
+        recordCommissionEntries(payment, allocations);
 
         BalanceAdjustmentRequest adjustment = new BalanceAdjustmentRequest();
         adjustment.setType(BalanceAdjustmentType.PAYMENT);
@@ -190,15 +202,17 @@ public class PaymentServiceImpl implements PaymentService {
         // its outstanding reduction.
         List<PaymentAllocation> originalAllocations = paymentAllocationRepository.findByPaymentId(original.getId());
         BigDecimal refundRatio = request.getAmount().divide(original.getAmount(), 8, RoundingMode.HALF_UP);
+        List<PaymentAllocation> reversingAllocations = new ArrayList<>();
         for (PaymentAllocation allocation : originalAllocations) {
             BigDecimal reversedAmount = allocation.getAmount().multiply(refundRatio).setScale(4, RoundingMode.HALF_UP);
             if (reversedAmount.compareTo(BigDecimal.ZERO) <= 0) continue;
-            paymentAllocationRepository.save(PaymentAllocation.builder()
+            reversingAllocations.add(paymentAllocationRepository.save(PaymentAllocation.builder()
                     .paymentId(refund.getId())
                     .invoiceId(allocation.getInvoiceId())
                     .amount(reversedAmount.negate())
-                    .build());
+                    .build()));
         }
+        recordCommissionEntries(refund, reversingAllocations);
 
         BalanceAdjustmentRequest adjustment = new BalanceAdjustmentRequest();
         adjustment.setType(BalanceAdjustmentType.CHARGE);
@@ -208,6 +222,46 @@ public class PaymentServiceImpl implements PaymentService {
         autoPostingService.postCustomerPayment(refund, actingUsername);
 
         return toResponse(refund);
+    }
+
+    // Commission accrues on the paid portion of an invoice, not the invoiced
+    // amount — so this runs off PaymentAllocation rows, symmetrically for
+    // both a payment's allocations and a refund's negative reversing ones
+    // (a refund's negative basisAmount naturally yields a negative
+    // commissionAmount, clawing back exactly what was earned on that
+    // portion). Skips silently whenever the invoice isn't tied to a sales
+    // order, that order has no salesRepUserId, or no commission rate
+    // resolves for that rep/company — commission tracking is opt-in per
+    // order, not universal.
+    private void recordCommissionEntries(Payment payment, List<PaymentAllocation> allocations) {
+        for (PaymentAllocation allocation : allocations) {
+            Invoice invoice = invoiceRepository.findById(allocation.getInvoiceId()).orElse(null);
+            if (invoice == null || invoice.getSalesOrderId() == null) continue;
+            SalesOrder salesOrder = salesOrderRepository.findById(invoice.getSalesOrderId()).orElse(null);
+            if (salesOrder == null || salesOrder.getSalesRepUserId() == null) continue;
+            BigDecimal rate = resolveCommissionRate(invoice.getCompanyId(), salesOrder.getSalesRepUserId());
+            if (rate == null) continue;
+
+            BigDecimal commissionAmount = allocation.getAmount().multiply(rate).divide(HUNDRED, 4, RoundingMode.HALF_UP);
+            commissionEntryRepository.save(CommissionEntry.builder()
+                    .companyId(invoice.getCompanyId())
+                    .salesRepUserId(salesOrder.getSalesRepUserId())
+                    .invoiceId(invoice.getId())
+                    .paymentId(payment.getId())
+                    .paymentAllocationId(allocation.getId())
+                    .basisAmount(allocation.getAmount())
+                    .ratePercent(rate)
+                    .commissionAmount(commissionAmount)
+                    .earnedDate(payment.getPaymentDate())
+                    .build());
+        }
+    }
+
+    private BigDecimal resolveCommissionRate(Long companyId, Long salesRepUserId) {
+        return commissionRuleRepository.findByCompanyIdAndUserIdAndActiveTrue(companyId, salesRepUserId)
+                .map(CommissionRule::getRatePercent)
+                .or(() -> commissionRuleRepository.findByCompanyIdAndUserIdIsNullAndActiveTrue(companyId).map(CommissionRule::getRatePercent))
+                .orElse(null);
     }
 
     // Mirrors CreditNoteServiceImpl.computeTotal — the invoice's own

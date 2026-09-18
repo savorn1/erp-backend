@@ -28,6 +28,10 @@ public class CreateSalesOrderRequest {
 
     private String notes;
 
+    // Optional — see SalesOrder.salesRepUserId. Null means no commission is
+    // tracked for this order.
+    private Long salesRepUserId;
+
     // Optional reference-only foreign currency — see SalesOrder's own
     // comment. Both null or both set, enforced in SalesOrderServiceImpl.
     private String foreignCurrency;
