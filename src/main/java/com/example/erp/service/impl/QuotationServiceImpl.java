@@ -42,6 +42,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -233,6 +234,9 @@ public class QuotationServiceImpl implements QuotationService {
         Quotation quotation = find(id);
         if (quotation.getStatus() != QuotationStatus.SENT) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only sent quotations can be accepted");
+        }
+        if (quotation.getValidUntil() != null && quotation.getValidUntil().isBefore(LocalDate.now())) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Quotation has expired");
         }
         quotation.setStatus(QuotationStatus.ACCEPTED);
         quotationRepository.save(quotation);

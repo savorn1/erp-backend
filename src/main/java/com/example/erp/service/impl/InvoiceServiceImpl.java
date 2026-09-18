@@ -118,11 +118,8 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     private Map<Long, List<InvoiceLine>> allLinesGroupedByInvoice(List<Long> invoiceIds) {
-        Map<Long, List<InvoiceLine>> result = new java.util.HashMap<>();
-        for (Long invoiceId : invoiceIds) {
-            result.put(invoiceId, invoiceLineRepository.findByInvoiceId(invoiceId));
-        }
-        return result;
+        return invoiceLineRepository.findByInvoiceIdIn(invoiceIds).stream()
+                .collect(Collectors.groupingBy(InvoiceLine::getInvoiceId));
     }
 
     @Override
@@ -484,6 +481,12 @@ public class InvoiceServiceImpl implements InvoiceService {
             conditions.add((root, query, cb) -> cb.equal(root.get("customerId"), filter.getCustomerId()));
         }
         List<Invoice> invoices = invoiceRepository.findAll(Specification.allOf(conditions));
+        List<Long> invoiceIds = invoices.stream().map(Invoice::getId).toList();
+        Map<Long, List<InvoiceLine>> linesByInvoiceId = invoiceIds.isEmpty() ? Map.of() : allLinesGroupedByInvoice(invoiceIds);
+        Map<Long, List<CreditNote>> creditNotesByInvoiceId = invoiceIds.isEmpty() ? Map.of()
+                : creditNoteRepository.findByInvoiceIdIn(invoiceIds).stream().collect(Collectors.groupingBy(CreditNote::getInvoiceId));
+        Map<Long, List<PaymentAllocation>> allocationsByInvoiceId = invoiceIds.isEmpty() ? Map.of()
+                : paymentAllocationRepository.findByInvoiceIdIn(invoiceIds).stream().collect(Collectors.groupingBy(PaymentAllocation::getInvoiceId));
 
         Map<Long, InvoiceAgingRowResponse> rowsByCustomer = new java.util.LinkedHashMap<>();
         InvoiceAgingRowResponse grandTotal = InvoiceAgingRowResponse.builder()
@@ -493,11 +496,11 @@ public class InvoiceServiceImpl implements InvoiceService {
                 .build();
 
         for (Invoice invoice : invoices) {
-            List<InvoiceLine> lines = invoiceLineRepository.findByInvoiceId(invoice.getId());
+            List<InvoiceLine> lines = linesByInvoiceId.getOrDefault(invoice.getId(), List.of());
             BigDecimal[] totals = computeTotals(lines);
-            BigDecimal credited = creditNoteRepository.findByInvoiceId(invoice.getId()).stream()
+            BigDecimal credited = creditNotesByInvoiceId.getOrDefault(invoice.getId(), List.of()).stream()
                     .map(CreditNote::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal paid = paymentAllocationRepository.findByInvoiceId(invoice.getId()).stream()
+            BigDecimal paid = allocationsByInvoiceId.getOrDefault(invoice.getId(), List.of()).stream()
                     .map(PaymentAllocation::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal outstanding = totals[3].subtract(credited).subtract(paid);
             if (outstanding.compareTo(BigDecimal.ZERO) <= 0) continue;

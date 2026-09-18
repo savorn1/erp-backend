@@ -54,6 +54,7 @@ import com.example.erp.entity.PurchaseInvoiceStatus;
 import com.example.erp.entity.PurchaseOrder;
 import com.example.erp.entity.PurchaseOrderLine;
 import com.example.erp.entity.PurchaseOrderStatus;
+import com.example.erp.entity.QualityCheckStatus;
 import com.example.erp.entity.Supplier;
 import com.example.erp.entity.SupplierPaymentAllocation;
 import com.example.erp.entity.SupplierType;
@@ -938,21 +939,94 @@ public class PurchaseReportServiceImpl implements PurchaseReportService {
             delaySumBySupplier.merge(order.getSupplierId(), delayDays, Long::sum);
         }
 
+        // Every matching order's lines, needed for both metrics below — loaded
+        // once and shared rather than queried twice.
+        Map<Long, Long> orderSupplier = orders.stream()
+                .collect(java.util.stream.Collectors.toMap(PurchaseOrder::getId, PurchaseOrder::getSupplierId));
+        List<PurchaseOrderLine> allLines = new ArrayList<>();
+        for (PurchaseOrder order : orders) {
+            allLines.addAll(purchaseOrderLineRepository.findByPurchaseOrderId(order.getId()));
+        }
+
+        // Price variance: a per-product benchmark is only meaningful where
+        // 2+ distinct suppliers were actually paid different prices for it in
+        // this period — a single-supplier product has nothing to compare
+        // against, so it's excluded rather than reported as "0% variance".
+        Map<Long, BigDecimal[]> productWeighted = new HashMap<>(); // productId -> [sum(qty*cost), sum(qty)]
+        Map<Long, java.util.Set<Long>> productSuppliers = new HashMap<>();
+        for (PurchaseOrderLine line : allLines) {
+            Long supplierId = orderSupplier.get(line.getPurchaseOrderId());
+            productSuppliers.computeIfAbsent(line.getProductId(), k -> new java.util.HashSet<>()).add(supplierId);
+            BigDecimal[] agg = productWeighted.computeIfAbsent(line.getProductId(), k -> new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
+            agg[0] = agg[0].add(line.getQuantityOrdered().multiply(line.getUnitCost()));
+            agg[1] = agg[1].add(line.getQuantityOrdered());
+        }
+        Map<Long, BigDecimal> productBenchmark = new HashMap<>();
+        for (Map.Entry<Long, BigDecimal[]> entry : productWeighted.entrySet()) {
+            if (productSuppliers.get(entry.getKey()).size() < 2) continue;
+            if (entry.getValue()[1].compareTo(BigDecimal.ZERO) == 0) continue;
+            productBenchmark.put(entry.getKey(), entry.getValue()[0].divide(entry.getValue()[1], 6, RoundingMode.HALF_UP));
+        }
+        Map<Long, BigDecimal[]> varianceBySupplier = new HashMap<>(); // supplierId -> [sum(qty*variancePct), sum(qty)]
+        for (PurchaseOrderLine line : allLines) {
+            BigDecimal benchmark = productBenchmark.get(line.getProductId());
+            if (benchmark == null || benchmark.compareTo(BigDecimal.ZERO) == 0) continue;
+            BigDecimal variancePercent = line.getUnitCost().subtract(benchmark)
+                    .divide(benchmark, 6, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100));
+            BigDecimal[] agg = varianceBySupplier.computeIfAbsent(orderSupplier.get(line.getPurchaseOrderId()),
+                    k -> new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
+            agg[0] = agg[0].add(variancePercent.multiply(line.getQuantityOrdered()));
+            agg[1] = agg[1].add(line.getQuantityOrdered());
+        }
+
+        // Quality pass rate: PASSED / (PASSED + FAILED) across this
+        // supplier's checked lines, resolved via purchaseOrderLineId -> order
+        // -> supplierId since GoodsReceiptLine has no supplierId of its own.
+        Map<Long, Long> lineOrder = allLines.stream()
+                .collect(java.util.stream.Collectors.toMap(PurchaseOrderLine::getId, PurchaseOrderLine::getPurchaseOrderId));
+        List<GoodsReceiptLine> receiptLines = lineOrder.isEmpty() ? List.of()
+                : goodsReceiptLineRepository.findByPurchaseOrderLineIdIn(new ArrayList<>(lineOrder.keySet()));
+        Map<Long, long[]> qualityBySupplier = new HashMap<>(); // supplierId -> [passed, checked]
+        for (GoodsReceiptLine receiptLine : receiptLines) {
+            if (receiptLine.getQualityStatus() == QualityCheckStatus.PENDING) continue;
+            Long orderId = lineOrder.get(receiptLine.getPurchaseOrderLineId());
+            if (orderId == null) continue;
+            long[] counts = qualityBySupplier.computeIfAbsent(orderSupplier.get(orderId), k -> new long[]{0, 0});
+            counts[1]++;
+            if (receiptLine.getQualityStatus() == QualityCheckStatus.PASSED) counts[0]++;
+        }
+
         List<SupplierPerformanceRowResponse> rows = new ArrayList<>();
         for (Map.Entry<Long, long[]> entry : orderCountBySupplier.entrySet()) {
-            Supplier supplier = suppliers.get(entry.getKey());
+            Long supplierId = entry.getKey();
+            Supplier supplier = suppliers.get(supplierId);
             long[] counts = entry.getValue();
             Double onTimePercent = counts[1] == 0 ? null : (counts[2] * 100.0) / counts[1];
-            Double avgDelay = counts[1] == 0 ? null : delaySumBySupplier.getOrDefault(entry.getKey(), 0L) / (double) counts[1];
+            Double avgDelay = counts[1] == 0 ? null : delaySumBySupplier.getOrDefault(supplierId, 0L) / (double) counts[1];
+
+            long[] quality = qualityBySupplier.get(supplierId);
+            Double qualityPassPercent = quality == null || quality[1] == 0 ? null : (quality[0] * 100.0) / quality[1];
+
+            BigDecimal[] variance = varianceBySupplier.get(supplierId);
+            Double priceVariancePercent = variance == null || variance[1].compareTo(BigDecimal.ZERO) == 0
+                    ? null
+                    : variance[0].divide(variance[1], 6, RoundingMode.HALF_UP).doubleValue();
+
             rows.add(SupplierPerformanceRowResponse.builder()
-                    .supplierId(entry.getKey())
+                    .supplierId(supplierId)
                     .supplierName(supplier == null ? null : supplier.getName())
                     .orderCount(counts[0])
                     .measurableOrderCount(counts[1])
                     .onTimeOrderCount(counts[2])
                     .onTimePercent(onTimePercent)
                     .averageDelayDays(avgDelay)
+                    .qualityPassPercent(qualityPassPercent)
+                    .priceVariancePercent(priceVariancePercent)
                     .build());
+        }
+        if (filter.getSupplierId() != null) {
+            rows = rows.stream().filter(r -> filter.getSupplierId().equals(r.getSupplierId()))
+                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         }
         rows.sort(Comparator.comparing((SupplierPerformanceRowResponse r) -> r.getOnTimePercent() == null ? -1.0 : r.getOnTimePercent()).reversed());
 

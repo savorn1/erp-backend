@@ -5,6 +5,7 @@ import com.example.erp.dto.CreateSalesOrderRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.SalesOrderFilterRequest;
 import com.example.erp.dto.SalesOrderResponse;
+import com.example.erp.dto.SendDocumentEmailRequest;
 import com.example.erp.dto.UpdateSalesOrderRequest;
 import com.example.erp.exception.AppException;
 import com.example.erp.service.SalesOrderService;
@@ -61,6 +62,18 @@ public class SalesOrderController {
     @PostMapping("/{id}/cancel")
     public ResponseEntity<ApiResponse<SalesOrderResponse>> cancel(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success("Sales order cancelled", salesOrderService.cancelSalesOrder(id)));
+    }
+
+    @PostMapping("/{id}/lines/{lineId}/cancel")
+    public ResponseEntity<ApiResponse<SalesOrderResponse>> cancelLine(@PathVariable Long id, @PathVariable Long lineId) {
+        return ResponseEntity.ok(ApiResponse.success("Line cancelled", salesOrderService.cancelSalesOrderLine(id, lineId)));
+    }
+
+    @PostMapping("/{id}/email")
+    public ResponseEntity<ApiResponse<Void>> email(@PathVariable Long id,
+                                                    @Valid @RequestBody(required = false) SendDocumentEmailRequest request) {
+        salesOrderService.emailSalesOrder(id, request != null ? request : new SendDocumentEmailRequest());
+        return ResponseEntity.ok(ApiResponse.success("Email sent", null));
     }
 
     @DeleteMapping("/{id}")

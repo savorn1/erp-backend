@@ -2,13 +2,16 @@ package com.example.erp.controller;
 
 import com.example.erp.dto.ApiResponse;
 import com.example.erp.dto.CreateQuotationRequest;
+import com.example.erp.dto.CreateSalesOrderFromQuotationRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.QuotationFilterRequest;
 import com.example.erp.dto.QuotationResponse;
+import com.example.erp.dto.SalesOrderResponse;
 import com.example.erp.dto.SendDocumentEmailRequest;
 import com.example.erp.dto.UpdateQuotationRequest;
 import com.example.erp.exception.AppException;
 import com.example.erp.service.QuotationService;
+import com.example.erp.service.SalesOrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -26,6 +29,7 @@ import org.springframework.web.bind.annotation.*;
 public class QuotationController {
 
     private final QuotationService quotationService;
+    private final SalesOrderService salesOrderService;
 
     @GetMapping
     public ResponseEntity<PageResponse<QuotationResponse>> list(@ModelAttribute QuotationFilterRequest filter) {
@@ -62,6 +66,13 @@ public class QuotationController {
     @PostMapping("/{id}/reject")
     public ResponseEntity<ApiResponse<QuotationResponse>> reject(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success("Quotation rejected", quotationService.rejectQuotation(id)));
+    }
+
+    @PostMapping("/{id}/convert-to-sales-order")
+    public ResponseEntity<ApiResponse<SalesOrderResponse>> convertToSalesOrder(@PathVariable Long id,
+            @Valid @RequestBody CreateSalesOrderFromQuotationRequest request, Authentication authentication) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Sales order created",
+                salesOrderService.createFromSalesQuotation(id, request, requireUsername(authentication))));
     }
 
     @DeleteMapping("/{id}")

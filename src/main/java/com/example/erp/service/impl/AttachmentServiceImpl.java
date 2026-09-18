@@ -24,7 +24,7 @@ public class AttachmentServiceImpl implements AttachmentService {
     private static final Logger log = LoggerFactory.getLogger(AttachmentServiceImpl.class);
 
     private static final Set<String> VALID_OWNER_TYPES = Set.of(
-            "INVOICE", "PURCHASE_ORDER", "SALES_ORDER", "CUSTOMER", "SUPPLIER"
+            "INVOICE", "PURCHASE_ORDER", "SALES_ORDER", "CUSTOMER", "SUPPLIER", "QUOTATION", "RMA_REQUEST", "TICKET"
     );
 
     private final AttachmentRepository attachmentRepository;

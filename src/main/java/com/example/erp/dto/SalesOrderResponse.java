@@ -20,6 +20,8 @@ public class SalesOrderResponse {
     private String companyName;
     private Long customerId;
     private String customerName;
+    // Set when this order was converted from an accepted Quotation.
+    private Long quotationId;
     private Long warehouseId;
     private String warehouseName;
     private String soNumber;

@@ -9,4 +9,6 @@ import java.util.List;
 public interface CreditNoteRepository extends JpaRepository<CreditNote, Long>, JpaSpecificationExecutor<CreditNote> {
 
     List<CreditNote> findByInvoiceId(Long invoiceId);
+
+    List<CreditNote> findByInvoiceIdIn(List<Long> invoiceIds);
 }

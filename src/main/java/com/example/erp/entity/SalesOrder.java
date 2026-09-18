@@ -38,6 +38,12 @@ public class SalesOrder {
     @Column(name = "customer_id", nullable = false)
     private Long customerId;
 
+    // Set when this order was converted from an accepted Quotation — see
+    // SalesOrderServiceImpl.createFromSalesQuotation. Null for orders created
+    // directly.
+    @Column(name = "quotation_id")
+    private Long quotationId;
+
     // Source warehouse — where deliveries against this SO decrease stock from.
     @Column(name = "warehouse_id", nullable = false)
     private Long warehouseId;

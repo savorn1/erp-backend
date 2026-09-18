@@ -14,10 +14,13 @@ import com.example.erp.entity.PurchaseOrderStatus;
 import com.example.erp.entity.PurchaseRequestStatus;
 import com.example.erp.entity.SalesOrderStatus;
 import com.example.erp.entity.StockAdjustmentStatus;
+import com.example.erp.entity.Ticket;
+import com.example.erp.entity.TicketStatus;
 import com.example.erp.repository.PurchaseOrderRepository;
 import com.example.erp.repository.PurchaseRequestRepository;
 import com.example.erp.repository.SalesOrderRepository;
 import com.example.erp.repository.StockAdjustmentRepository;
+import com.example.erp.repository.TicketRepository;
 import com.example.erp.service.InventoryReportService;
 import com.example.erp.service.InvoiceService;
 import com.example.erp.service.NotificationService;
@@ -40,6 +43,7 @@ public class NotificationServiceImpl implements NotificationService {
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final PurchaseRequestRepository purchaseRequestRepository;
     private final StockAdjustmentRepository stockAdjustmentRepository;
+    private final TicketRepository ticketRepository;
 
     @Override
     public NotificationSummaryResponse getSummary() {
@@ -91,6 +95,11 @@ public class NotificationServiceImpl implements NotificationService {
                 "/purchase-requests", purchaseRequestRepository.countByStatus(PurchaseRequestStatus.SUBMITTED));
         addPendingApproval(items, "PENDING_STOCK_ADJUSTMENTS", "stock adjustments awaiting approval",
                 "/stock-adjustments", stockAdjustmentRepository.countByStatus(StockAdjustmentStatus.PENDING));
+
+        long overdueTickets = ticketRepository.findByStatusIn(List.of(TicketStatus.OPEN, TicketStatus.IN_PROGRESS)).stream()
+                .filter(Ticket::isOverdue)
+                .count();
+        addPendingApproval(items, "OVERDUE_TICKETS", "tickets overdue", "/tickets?overdue=true", overdueTickets);
 
         return NotificationSummaryResponse.builder()
                 .items(items)

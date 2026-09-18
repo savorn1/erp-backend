@@ -1,11 +1,13 @@
 package com.example.erp.service.impl;
 
+import com.example.erp.dto.CreateSalesOrderFromQuotationRequest;
 import com.example.erp.dto.CreateSalesOrderRequest;
 import com.example.erp.dto.PageResponse;
 import com.example.erp.dto.SalesOrderFilterRequest;
 import com.example.erp.dto.SalesOrderLineRequest;
 import com.example.erp.dto.SalesOrderLineResponse;
 import com.example.erp.dto.SalesOrderResponse;
+import com.example.erp.dto.SendDocumentEmailRequest;
 import com.example.erp.dto.UpdateSalesOrderRequest;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.Customer;
@@ -13,6 +15,9 @@ import com.example.erp.entity.CustomerGroup;
 import com.example.erp.entity.InventorySettings;
 import com.example.erp.entity.PriceGroup;
 import com.example.erp.entity.Product;
+import com.example.erp.entity.Quotation;
+import com.example.erp.entity.QuotationLine;
+import com.example.erp.entity.QuotationStatus;
 import com.example.erp.entity.SalesOrder;
 import com.example.erp.entity.SalesOrderLine;
 import com.example.erp.entity.SalesOrderStatus;
@@ -25,12 +30,17 @@ import com.example.erp.repository.CustomerRepository;
 import com.example.erp.repository.PriceGroupRepository;
 import com.example.erp.repository.ProductPriceRepository;
 import com.example.erp.repository.ProductRepository;
+import com.example.erp.repository.QuotationLineRepository;
+import com.example.erp.repository.QuotationRepository;
 import com.example.erp.repository.SalesOrderLineRepository;
 import com.example.erp.repository.SalesOrderRepository;
 import com.example.erp.repository.StockLevelRepository;
 import com.example.erp.repository.WarehouseRepository;
+import com.example.erp.service.EmailService;
 import com.example.erp.service.InventorySettingsService;
+import com.example.erp.service.PdfRenderService;
 import com.example.erp.service.SalesOrderService;
+import com.example.erp.util.DocumentPdfHtml;
 import com.example.erp.util.PageableUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -42,6 +52,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -66,6 +77,10 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final StockAvailabilityService stockAvailabilityService;
     private final InventorySettingsService inventorySettingsService;
     private final ApprovalWorkflowService approvalWorkflowService;
+    private final QuotationRepository quotationRepository;
+    private final QuotationLineRepository quotationLineRepository;
+    private final PdfRenderService pdfRenderService;
+    private final EmailService emailService;
 
     @Override
     @Transactional(readOnly = true)
@@ -147,6 +162,59 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         salesOrderRepository.save(so);
 
         List<SalesOrderLine> lines = saveLines(so.getId(), request.getCustomerId(), request.getLines());
+        return toFullResponse(so, lines);
+    }
+
+    // Mirrors QuotationServiceImpl.createFromOpportunity one hop further down
+    // the pipeline — the one conversion this codebase was missing. Lives here
+    // (not on QuotationService) so the target document's own service owns its
+    // own construction, same as createSalesOrder itself; QuotationController
+    // exposes the trigger endpoint since the source document is where the
+    // "convert" action naturally lives.
+    @Override
+    @Transactional
+    public SalesOrderResponse createFromSalesQuotation(Long quotationId, CreateSalesOrderFromQuotationRequest request, String actingUsername) {
+        Quotation quotation = quotationRepository.findById(quotationId)
+                .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Quotation not found with id: " + quotationId));
+        if (quotation.getStatus() != QuotationStatus.ACCEPTED) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Only accepted quotations can be converted to a sales order");
+        }
+        requireQuotationNotExpired(quotation);
+        if (quotation.getCustomerId() == null) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Quotation has no customer to create a sales order for");
+        }
+        requireWarehouse(request.getWarehouseId(), quotation.getCompanyId());
+
+        List<QuotationLine> quotationLines = quotationLineRepository.findByQuotationId(quotationId);
+        if (quotationLines.isEmpty()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Quotation has no lines to convert");
+        }
+
+        SalesOrder so = SalesOrder.builder()
+                .companyId(quotation.getCompanyId())
+                .customerId(quotation.getCustomerId())
+                .quotationId(quotation.getId())
+                .warehouseId(request.getWarehouseId())
+                .orderDate(request.getOrderDate())
+                .expectedDate(request.getExpectedDate())
+                .foreignCurrency(quotation.getForeignCurrency())
+                .exchangeRate(quotation.getExchangeRate())
+                .createdBy(actingUsername)
+                .build();
+        salesOrderRepository.save(so);
+        so.setSoNumber("SO-" + String.format("%06d", so.getId()));
+        salesOrderRepository.save(so);
+
+        List<SalesOrderLineRequest> lineRequests = quotationLines.stream()
+                .map(l -> {
+                    SalesOrderLineRequest lineRequest = new SalesOrderLineRequest();
+                    lineRequest.setProductId(l.getProductId());
+                    lineRequest.setQuantityOrdered(l.getQuantity());
+                    lineRequest.setUnitPrice(l.getUnitPrice());
+                    return lineRequest;
+                })
+                .toList();
+        List<SalesOrderLine> lines = saveLines(so.getId(), quotation.getCustomerId(), lineRequests);
         return toFullResponse(so, lines);
     }
 
@@ -277,6 +345,90 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         salesOrderRepository.save(so);
         approvalWorkflowService.clearApprovals("SALES_ORDER", id);
         return toFullResponse(so, lineRepository.findBySalesOrderId(id));
+    }
+
+    // Cancels only the undelivered remainder of one line (e.g. one
+    // out-of-stock item on an otherwise fine order) rather than the whole
+    // order — reuses cancelSalesOrder's own release arithmetic. No new
+    // line-status concept: reducing quantityOrdered down to quantityDelivered
+    // is enough to mark "nothing more coming" without touching what already
+    // shipped. Only meaningful on a CONFIRMED order — DRAFT/SUBMITTED lines
+    // are edited via updateSalesOrder instead, and once DELIVERED/CANCELLED
+    // there's nothing left to cancel.
+    @Override
+    @Transactional
+    public SalesOrderResponse cancelSalesOrderLine(Long id, Long lineId) {
+        SalesOrder so = find(id);
+        if (so.getStatus() != SalesOrderStatus.CONFIRMED) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Only confirmed sales orders support cancelling a line");
+        }
+        SalesOrderLine line = lineRepository.findById(lineId)
+                .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Sales order line not found with id: " + lineId));
+        if (!line.getSalesOrderId().equals(id)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Line does not belong to this sales order");
+        }
+        BigDecimal remaining = line.getQuantityOrdered().subtract(line.getQuantityDelivered());
+        if (remaining.signum() <= 0) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Nothing remaining to cancel on this line");
+        }
+        if (inventorySettingsService.resolveForCompany(so.getCompanyId()).isReserveStock()) {
+            release(line.getProductId(), so.getCompanyId(), so.getWarehouseId(), remaining);
+        }
+        line.setQuantityOrdered(line.getQuantityDelivered());
+        lineRepository.save(line);
+        return toFullResponse(so, lineRepository.findBySalesOrderId(id));
+    }
+
+    @Override
+    public void emailSalesOrder(Long id, SendDocumentEmailRequest request) {
+        SalesOrderResponse so = getSalesOrder(id);
+        Customer customer = so.getCustomerId() != null
+                ? customerRepository.findById(so.getCustomerId()).orElse(null) : null;
+        String to = request.getTo() != null && !request.getTo().isBlank() ? request.getTo()
+                : customer != null ? customer.getEmail() : null;
+        if (to == null || to.isBlank()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Customer has no email on file — provide one to send to");
+        }
+        Company company = companyRepository.findById(so.getCompanyId()).orElse(null);
+        String html = buildSalesOrderHtml(company, so);
+        byte[] pdf = pdfRenderService.renderHtmlToPdf(html);
+
+        String subject = request.getSubject() != null && !request.getSubject().isBlank()
+                ? request.getSubject() : "Sales order " + so.getSoNumber();
+        String body = request.getMessage() != null && !request.getMessage().isBlank()
+                ? request.getMessage() : "Please find attached sales order " + so.getSoNumber() + ".";
+        emailService.sendWithAttachment(to, subject, body, pdf, so.getSoNumber() + ".pdf", "application/pdf");
+    }
+
+    private String buildSalesOrderHtml(Company company, SalesOrderResponse so) {
+        String metaHtml = "Order date: " + so.getOrderDate()
+                + (so.getExpectedDate() != null ? "<br/>Expected: " + so.getExpectedDate() : "");
+
+        StringBuilder table = new StringBuilder();
+        table.append("<table><thead><tr><th>Product</th><th>Qty</th><th class=\"num\">Unit price</th>")
+                .append("<th class=\"num\">Line total</th></tr></thead><tbody>");
+        for (SalesOrderLineResponse line : so.getLines()) {
+            table.append("<tr><td>").append(DocumentPdfHtml.escape(line.getProductName())).append("</td>")
+                    .append("<td>").append(line.getQuantityOrdered()).append("</td>")
+                    .append("<td class=\"num\">").append(line.getUnitPrice()).append("</td>")
+                    .append("<td class=\"num\">").append(line.getLineTotal()).append("</td></tr>");
+        }
+        table.append("</tbody></table>");
+
+        StringBuilder totals = new StringBuilder("<div class=\"totals\">");
+        totals.append("<div class=\"grand\"><span>Total</span><span>").append(so.getTotalAmount()).append("</span></div>");
+        totals.append("</div>");
+
+        String partyHtml = DocumentPdfHtml.escape(so.getCustomerName());
+
+        return DocumentPdfHtml.render(company, "SALES ORDER", so.getSoNumber(), metaHtml,
+                "Prepared for", partyHtml, table.toString(), totals.toString());
+    }
+
+    private void requireQuotationNotExpired(Quotation quotation) {
+        if (quotation.getValidUntil() != null && quotation.getValidUntil().isBefore(LocalDate.now())) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Quotation has expired");
+        }
     }
 
     @Override
@@ -502,6 +654,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .companyName(companyName)
                 .customerId(so.getCustomerId())
                 .customerName(customerName)
+                .quotationId(so.getQuotationId())
                 .warehouseId(so.getWarehouseId())
                 .warehouseName(warehouseName)
                 .soNumber(so.getSoNumber())

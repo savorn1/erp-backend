@@ -13,6 +13,8 @@ public interface GoodsReceiptLineRepository extends JpaRepository<GoodsReceiptLi
 
     List<GoodsReceiptLine> findByGoodsReceiptId(Long goodsReceiptId);
 
+    List<GoodsReceiptLine> findByPurchaseOrderLineIdIn(List<Long> purchaseOrderLineIds);
+
     // Quantity already claimed by other receipts against this PO line that
     // haven't cleared quality check yet — subtracted from the remaining
     // receivable quantity so two in-flight receipts can't both claim the same

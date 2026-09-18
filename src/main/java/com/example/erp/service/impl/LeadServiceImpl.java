@@ -111,7 +111,7 @@ public class LeadServiceImpl implements LeadService {
     public LeadResponse createLead(CreateLeadRequest request, String actingUsername) {
         requireCompany(request.getCompanyId());
         if (request.getAssignedToUserId() != null) {
-            requireUser(request.getAssignedToUserId());
+            requireUser(request.getAssignedToUserId(), request.getCompanyId());
         }
 
         Lead lead = Lead.builder()
@@ -183,7 +183,7 @@ public class LeadServiceImpl implements LeadService {
         if (request.getAssignedToUserId() == null) {
             description = "Unassigned";
         } else {
-            requireUser(request.getAssignedToUserId());
+            requireUser(request.getAssignedToUserId(), lead.getCompanyId());
             description = "Assigned to " + usernameOf(request.getAssignedToUserId());
         }
         lead.setAssignedToUserId(request.getAssignedToUserId());
@@ -261,9 +261,15 @@ public class LeadServiceImpl implements LeadService {
                 .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Company not found with id: " + companyId));
     }
 
-    private User requireUser(Long userId) {
-        return userRepository.findById(userId)
+    // A null User.companyId means a global/unscoped user (e.g. an admin not
+    // tied to one company) — always allowed. A non-null mismatch is rejected.
+    private User requireUser(Long userId, Long companyId) {
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "User not found with id: " + userId));
+        if (user.getCompanyId() != null && !user.getCompanyId().equals(companyId)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Assigned user does not belong to the selected company");
+        }
+        return user;
     }
 
     private String companyNameOf(Long companyId) {

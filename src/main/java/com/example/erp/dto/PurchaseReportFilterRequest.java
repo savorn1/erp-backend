@@ -16,4 +16,8 @@ public class PurchaseReportFilterRequest {
     private LocalDate dateTo;
     // Omitted means every status except CANCELLED (see PurchaseReportServiceImpl).
     private PurchaseOrderStatus status;
+    // Only consumed by supplierPerformance(), and only to filter the RETURNED
+    // rows — never to restrict which orders feed its cross-supplier price
+    // benchmark, or the benchmark would lose the other suppliers it needs.
+    private Long supplierId;
 }
