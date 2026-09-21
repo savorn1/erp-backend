@@ -521,13 +521,17 @@ public class InventoryReportServiceImpl implements InventoryReportService {
         Map<Long, BigDecimal> receivedByBatch = new LinkedHashMap<>();
         for (GoodsReceiptLine line : goodsReceiptLineRepository.findAll()) {
             if (line.getBatchId() == null || line.getQualityStatus() != QualityCheckStatus.PASSED) continue;
-            receivedByBatch.merge(line.getBatchId(), line.getQuantityReceived(), BigDecimal::add);
+            // Batch balances are held in the product's inventory unit, but receipt and
+            // delivery lines are in the purchase/sales unit of their source order line
+            // (e.g. BOX). Both sides convert through their snapshotted factor before
+            // being netted, otherwise a batch ordered in boxes reconciles to nonsense.
+            receivedByBatch.merge(line.getBatchId(), inBaseUnits(line.getQuantityReceived(), line.getConversionFactor()), BigDecimal::add);
         }
 
         Map<Long, BigDecimal> issuedByBatch = new LinkedHashMap<>();
         for (DeliveryLine line : deliveryLineRepository.findAll()) {
             if (line.getBatchId() == null) continue;
-            issuedByBatch.merge(line.getBatchId(), line.getQuantityDelivered(), BigDecimal::add);
+            issuedByBatch.merge(line.getBatchId(), inBaseUnits(line.getQuantityDelivered(), line.getConversionFactor()), BigDecimal::add);
         }
 
         Map<Long, StockAdjustmentStatus> adjustmentStatusById = stockAdjustmentRepository.findAll().stream()
@@ -675,7 +679,8 @@ public class InventoryReportServiceImpl implements InventoryReportService {
             for (DeliveryLine line : deliveryLineRepository.findAll()) {
                 if (!deliveriesById.containsKey(line.getDeliveryId())) continue;
                 if (filter.getProductId() != null && !filter.getProductId().equals(line.getProductId())) continue;
-                soldByProduct.merge(line.getProductId(), line.getQuantityDelivered(), BigDecimal::add);
+                // Compared against stock further down, so it has to be in base units.
+                soldByProduct.merge(line.getProductId(), inBaseUnits(line.getQuantityDelivered(), line.getConversionFactor()), BigDecimal::add);
             }
         }
 
@@ -789,5 +794,12 @@ public class InventoryReportServiceImpl implements InventoryReportService {
         filter.setSize(1_000_000);
         filter.setPage(1);
         return inventoryOverviewService.getOverview(filter).getData();
+    }
+
+    // Receipt and delivery lines are stored in their source order line's unit with
+    // the conversion factor snapshotted alongside. A null factor means the row
+    // predates UoM support and is already in the product's inventory unit.
+    private BigDecimal inBaseUnits(BigDecimal quantity, BigDecimal conversionFactor) {
+        return conversionFactor == null ? quantity : quantity.multiply(conversionFactor);
     }
 }

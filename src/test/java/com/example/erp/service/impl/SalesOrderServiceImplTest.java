@@ -17,6 +17,8 @@ import com.example.erp.repository.CustomerRepository;
 import com.example.erp.repository.PriceGroupRepository;
 import com.example.erp.repository.ProductPriceRepository;
 import com.example.erp.repository.ProductRepository;
+import com.example.erp.repository.ProductUomRepository;
+import com.example.erp.repository.UnitOfMeasureRepository;
 import com.example.erp.repository.QuotationLineRepository;
 import com.example.erp.repository.QuotationRepository;
 import com.example.erp.repository.SalesOrderLineRepository;
@@ -58,6 +60,10 @@ class SalesOrderServiceImplTest {
     private WarehouseRepository warehouseRepository;
     @Mock
     private ProductRepository productRepository;
+    @Mock
+    private ProductUomRepository productUomRepository;
+    @Mock
+    private UnitOfMeasureRepository unitOfMeasureRepository;
     @Mock
     private StockLevelRepository stockLevelRepository;
     @Mock

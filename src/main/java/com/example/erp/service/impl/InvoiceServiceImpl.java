@@ -231,7 +231,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Transactional
     public InvoiceResponse approveInvoice(Long id, String actingUsername) {
         Invoice invoice = find(id);
-        if (invoice.getStatus() != InvoiceStatus.DRAFT) {
+        if (!invoice.getStatus().canTransitionTo(InvoiceStatus.APPROVED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft invoices can be approved");
         }
         List<InvoiceLine> lines = invoiceLineRepository.findByInvoiceId(id);
@@ -258,8 +258,8 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Transactional
     public InvoiceResponse cancelInvoice(Long id, String actingUsername) {
         Invoice invoice = find(id);
-        if (invoice.getStatus() == InvoiceStatus.CANCELLED) {
-            throw new AppException(HttpStatus.BAD_REQUEST, "Invoice is already cancelled");
+        if (!invoice.getStatus().canTransitionTo(InvoiceStatus.CANCELLED)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Only draft or approved invoices can be cancelled");
         }
         List<InvoiceLine> lines = invoiceLineRepository.findByInvoiceId(id);
 

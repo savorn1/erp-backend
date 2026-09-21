@@ -17,7 +17,12 @@ public class QuotationLineResponse {
     private Long productId;
     private String productName;
     private String productSku;
+    private Long unitOfMeasureId;
+    private String unitOfMeasureAbbreviation;
+    private BigDecimal conversionFactor;
     private BigDecimal quantity;
+    // quantity restated in the product's inventory unit.
+    private BigDecimal baseQuantity;
     private BigDecimal unitPrice;
     private BigDecimal lineTotal;
 }

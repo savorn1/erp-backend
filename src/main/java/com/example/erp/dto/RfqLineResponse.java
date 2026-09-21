@@ -17,5 +17,9 @@ public class RfqLineResponse {
     private Long productId;
     private String productName;
     private String productSku;
+    private Long unitOfMeasureId;
+    private String unitOfMeasureAbbreviation;
+    private BigDecimal conversionFactor;
     private BigDecimal quantity;
+    private BigDecimal baseQuantity;
 }

@@ -33,6 +33,21 @@ public class SalesOrderLine {
     @Column(name = "product_id", nullable = false)
     private Long productId;
 
+    // The unit quantityOrdered/quantityDelivered are expressed in — e.g. selling
+    // "10 BOX" of a product whose inventory unit is PCS. Nullable — added to an
+    // already-populated table; a null read means "the product's own base unit,
+    // factor 1" (see SalesOrderServiceImpl.resolveLineUnit).
+    @Column(name = "unit_of_measure_id")
+    private Long unitOfMeasureId;
+
+    // Snapshotted from ProductUom.conversionFactor at order time — how many of
+    // the product's base/inventory unit equal 1 of unitOfMeasureId above. Frozen
+    // here (not re-looked-up) so editing that ProductUom afterwards can't
+    // silently change what an already-placed order meant, and so deliveries
+    // against it keep converting to stock the same way.
+    @Column(name = "conversion_factor", precision = 19, scale = 6)
+    private BigDecimal conversionFactor;
+
     @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal quantityOrdered;
 

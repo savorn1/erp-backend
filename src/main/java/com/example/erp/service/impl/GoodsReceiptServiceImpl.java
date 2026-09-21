@@ -317,7 +317,12 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
 
             boolean fullyReceived = purchaseOrderLineRepository.findByPurchaseOrderId(po.getId()).stream()
                     .allMatch(l -> l.getQuantityReceived().compareTo(l.getQuantityOrdered()) >= 0);
-            po.setStatus(fullyReceived ? PurchaseOrderStatus.RECEIVED : PurchaseOrderStatus.PARTIALLY_RECEIVED);
+            PurchaseOrderStatus nextPurchaseOrderStatus = fullyReceived ? PurchaseOrderStatus.RECEIVED : PurchaseOrderStatus.PARTIALLY_RECEIVED;
+            if (!po.getStatus().canTransitionTo(nextPurchaseOrderStatus)) {
+                throw new AppException(HttpStatus.BAD_REQUEST,
+                        "Purchase order cannot be updated from " + po.getStatus() + " to " + nextPurchaseOrderStatus);
+            }
+            po.setStatus(nextPurchaseOrderStatus);
             purchaseOrderRepository.save(po);
         } else {
             serials.forEach(s -> s.setStatus(SerialNumberStatus.QC_REJECTED));

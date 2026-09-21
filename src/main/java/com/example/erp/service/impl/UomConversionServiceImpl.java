@@ -125,6 +125,12 @@ public class UomConversionServiceImpl implements UomConversionService {
         UnitOfMeasure from = requireUnit(request.getFromUnitOfMeasureId());
         UnitOfMeasure to = requireUnit(request.getToUnitOfMeasureId());
 
+        // A direct row may have been created before a unit was moved to a
+        // different category. Check compatibility before consulting direct
+        // edges so such stale data can never bypass the category boundary.
+        if (!from.getId().equals(to.getId())) {
+            validatePair(from, to);
+        }
         BigDecimal converted = from.getId().equals(to.getId())
                 ? request.getQuantity()
                 : convertQuantity(from, to, request.getQuantity());

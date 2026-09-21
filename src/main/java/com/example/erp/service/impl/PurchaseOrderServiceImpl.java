@@ -158,7 +158,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     @Transactional
     public PurchaseOrderResponse updatePurchaseOrder(Long id, UpdatePurchaseOrderRequest request) {
         PurchaseOrder po = find(id);
-        if (po.getStatus() != PurchaseOrderStatus.DRAFT) {
+        if (!po.getStatus().canTransitionTo(PurchaseOrderStatus.SUBMITTED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft purchase orders can be edited");
         }
         requireCompany(request.getCompanyId());
@@ -195,7 +195,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     @Transactional
     public PurchaseOrderResponse approvePurchaseOrder(Long id, String actingUsername) {
         PurchaseOrder po = find(id);
-        if (po.getStatus() != PurchaseOrderStatus.SUBMITTED) {
+        if (!po.getStatus().canTransitionTo(PurchaseOrderStatus.APPROVED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only submitted purchase orders can be approved");
         }
         List<PurchaseOrderLine> lines = lineRepository.findByPurchaseOrderId(id);
@@ -214,7 +214,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     @Transactional
     public PurchaseOrderResponse sendPurchaseOrder(Long id) {
         PurchaseOrder po = find(id);
-        if (po.getStatus() != PurchaseOrderStatus.APPROVED) {
+        if (!po.getStatus().canTransitionTo(PurchaseOrderStatus.SENT)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only approved purchase orders can be sent");
         }
         po.setStatus(PurchaseOrderStatus.SENT);
@@ -226,8 +226,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     @Transactional
     public PurchaseOrderResponse cancelPurchaseOrder(Long id) {
         PurchaseOrder po = find(id);
-        if (po.getStatus() != PurchaseOrderStatus.DRAFT && po.getStatus() != PurchaseOrderStatus.SUBMITTED
-                && po.getStatus() != PurchaseOrderStatus.APPROVED && po.getStatus() != PurchaseOrderStatus.SENT) {
+        if (!po.getStatus().canTransitionTo(PurchaseOrderStatus.CANCELLED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft, submitted, approved, or sent purchase orders can be cancelled");
         }
         po.setStatus(PurchaseOrderStatus.CANCELLED);

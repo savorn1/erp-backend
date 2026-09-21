@@ -47,6 +47,18 @@ public class LeadOpportunityMergeMigration implements ApplicationRunner {
             return;
         }
 
+        // Hibernate auto-generates a CHECK constraint for @Enumerated(STRING)
+        // columns at table-creation time (Hibernate 6+), reflecting whatever
+        // enum values existed back then. ddl-auto=update never touches an
+        // already-existing column's constraints, so the old LeadStatus/
+        // LeadActivityType value lists are still enforced at the DB level
+        // and reject every new value below unless dropped first. The ORM
+        // layer already fully validates these (only a real Java enum
+        // constant can ever be assigned), so losing this DB-level check is
+        // pure defense-in-depth, not a real validation gap.
+        jdbc.execute("ALTER TABLE leads DROP CONSTRAINT IF EXISTS leads_status_check");
+        jdbc.execute("ALTER TABLE lead_activities DROP CONSTRAINT IF EXISTS lead_activities_type_check");
+
         if (tableExists("opportunities")) {
             migrateOpportunities();
             migrateOpportunityActivities();

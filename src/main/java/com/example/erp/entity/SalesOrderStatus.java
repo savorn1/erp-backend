@@ -9,5 +9,16 @@ public enum SalesOrderStatus {
     CONFIRMED,
     PARTIALLY_DELIVERED,
     DELIVERED,
-    CANCELLED
+    CANCELLED;
+
+    /** The authoritative sales-order lifecycle, used by services that change status. */
+    public boolean canTransitionTo(SalesOrderStatus next) {
+        return switch (this) {
+            case DRAFT -> next == SUBMITTED || next == CANCELLED;
+            case SUBMITTED -> next == CONFIRMED || next == CANCELLED;
+            case CONFIRMED -> next == PARTIALLY_DELIVERED || next == DELIVERED || next == CANCELLED;
+            case PARTIALLY_DELIVERED -> next == DELIVERED;
+            case DELIVERED, CANCELLED -> false;
+        };
+    }
 }

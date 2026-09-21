@@ -16,6 +16,8 @@ import com.example.erp.entity.InventorySettings;
 import com.example.erp.entity.Lead;
 import com.example.erp.entity.PriceGroup;
 import com.example.erp.entity.Product;
+import com.example.erp.entity.ProductUom;
+import com.example.erp.entity.UnitOfMeasure;
 import com.example.erp.entity.Quotation;
 import com.example.erp.entity.QuotationLine;
 import com.example.erp.entity.QuotationStatus;
@@ -33,6 +35,8 @@ import com.example.erp.repository.LeadRepository;
 import com.example.erp.repository.PriceGroupRepository;
 import com.example.erp.repository.ProductPriceRepository;
 import com.example.erp.repository.ProductRepository;
+import com.example.erp.repository.ProductUomRepository;
+import com.example.erp.repository.UnitOfMeasureRepository;
 import com.example.erp.repository.QuotationLineRepository;
 import com.example.erp.repository.QuotationRepository;
 import com.example.erp.repository.SalesOrderLineRepository;
@@ -74,6 +78,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final CustomerRepository customerRepository;
     private final WarehouseRepository warehouseRepository;
     private final ProductRepository productRepository;
+    private final ProductUomRepository productUomRepository;
+    private final UnitOfMeasureRepository unitOfMeasureRepository;
     private final StockLevelRepository stockLevelRepository;
     private final CustomerGroupRepository customerGroupRepository;
     private final ProductPriceRepository productPriceRepository;
@@ -230,6 +236,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .map(l -> {
                     SalesOrderLineRequest lineRequest = new SalesOrderLineRequest();
                     lineRequest.setProductId(l.getProductId());
+                    // Carry the quoted unit across — the price was quoted per this unit,
+                    // so dropping it here would silently reprice the order.
+                    lineRequest.setUnitOfMeasureId(l.getUnitOfMeasureId());
                     lineRequest.setQuantityOrdered(l.getQuantity());
                     lineRequest.setUnitPrice(l.getUnitPrice());
                     return lineRequest;
@@ -275,7 +284,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Transactional
     public SalesOrderResponse submitSalesOrder(Long id) {
         SalesOrder so = find(id);
-        if (so.getStatus() != SalesOrderStatus.DRAFT) {
+        if (!so.getStatus().canTransitionTo(SalesOrderStatus.SUBMITTED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft sales orders can be submitted");
         }
         so.setStatus(SalesOrderStatus.SUBMITTED);
@@ -294,7 +303,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Transactional
     public SalesOrderResponse approveSalesOrder(Long id, String actingUsername) {
         SalesOrder so = find(id);
-        if (so.getStatus() != SalesOrderStatus.SUBMITTED) {
+        if (!so.getStatus().canTransitionTo(SalesOrderStatus.CONFIRMED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only submitted sales orders can be approved");
         }
         List<SalesOrderLine> lines = lineRepository.findBySalesOrderId(id);
@@ -352,8 +361,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Transactional
     public SalesOrderResponse cancelSalesOrder(Long id) {
         SalesOrder so = find(id);
-        if (so.getStatus() != SalesOrderStatus.DRAFT && so.getStatus() != SalesOrderStatus.SUBMITTED
-                && so.getStatus() != SalesOrderStatus.CONFIRMED) {
+        if (!so.getStatus().canTransitionTo(SalesOrderStatus.CANCELLED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft, submitted, or confirmed sales orders can be cancelled");
         }
         // Only a CONFIRMED order ever reserved anything — DRAFT/SUBMITTED
@@ -490,9 +498,12 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     BigDecimal unitPrice = r.getUnitPrice() != null ? r.getUnitPrice() : resolveUnitPrice(r.getProductId(), priceGroupId, product);
                     BigDecimal taxRate = r.getTaxRate() != null ? r.getTaxRate()
                             : (product == null ? BigDecimal.ZERO : product.getTaxRate());
+                    UnitSelection unit = resolveLineUnit(product, r.getUnitOfMeasureId());
                     return SalesOrderLine.builder()
                             .salesOrderId(salesOrderId)
                             .productId(r.getProductId())
+                            .unitOfMeasureId(unit.unitOfMeasureId())
+                            .conversionFactor(unit.conversionFactor())
                             .quantityOrdered(r.getQuantityOrdered())
                             .unitPrice(unitPrice)
                             .discountPercent(r.getDiscountPercent() == null ? BigDecimal.ZERO : r.getDiscountPercent())
@@ -501,6 +512,37 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 })
                 .toList();
         return lineRepository.saveAll(lines);
+    }
+
+    private record UnitSelection(Long unitOfMeasureId, BigDecimal conversionFactor) {}
+
+    // Mirrors PurchaseOrderServiceImpl.resolveLineUnit, but gated on allowSales
+    // rather than allowPurchase. The factor is snapshotted onto the line because
+    // deliveries convert through it to move stock — see DeliveryServiceImpl.
+    private UnitSelection resolveLineUnit(Product product, Long requestedUnitOfMeasureId) {
+        // Deliberately tolerant: callers that require a real product validate it
+        // separately, and a product with no base unit configured predates UoM setup.
+        // Falling back to "no conversion" keeps this from changing which lines are
+        // allowed to save — it only adds the unit when there is one to add.
+        Long unitId = requestedUnitOfMeasureId != null ? requestedUnitOfMeasureId
+                : (product == null ? null : product.getUnitOfMeasureId());
+        if (product == null || unitId == null || unitId.equals(product.getUnitOfMeasureId())) {
+            return new UnitSelection(unitId, BigDecimal.ONE);
+        }
+        ProductUom productUom = productUomRepository
+                .findByProductIdAndVariantIdIsNullAndUnitOfMeasureId(product.getId(), unitId)
+                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST,
+                        "This unit is not configured for " + product.getName() + " — add it under the product's UOMs first"));
+        if (!productUom.isAllowSales()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "This unit is not allowed for selling " + product.getName());
+        }
+        return new UnitSelection(unitId, productUom.getConversionFactor());
+    }
+
+    // Lines saved before unitOfMeasureId/conversionFactor existed read back as
+    // the product's own base unit at factor 1.
+    private BigDecimal conversionFactorOf(SalesOrderLine line) {
+        return line.getConversionFactor() != null ? line.getConversionFactor() : BigDecimal.ONE;
     }
 
     // Cascade: explicit per-product ProductPrice override wins; otherwise, if
@@ -600,9 +642,15 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 lines.stream().map(SalesOrderLine::getProductId).distinct().toList()
         ).stream().collect(Collectors.toMap(Product::getId, p -> p));
 
+        Map<Long, UnitOfMeasure> units = unitOfMeasureRepository.findAllById(
+                lines.stream().map(SalesOrderLine::getUnitOfMeasureId).filter(Objects::nonNull).distinct().toList()
+        ).stream().collect(Collectors.toMap(UnitOfMeasure::getId, u -> u));
+
         List<SalesOrderLineResponse> lineResponses = lines.stream()
                 .map(line -> {
                     Product product = products.get(line.getProductId());
+                    UnitOfMeasure unit = units.get(line.getUnitOfMeasureId());
+                    BigDecimal conversionFactor = conversionFactorOf(line);
                     BigDecimal discountPercent = nonNull(line.getDiscountPercent());
                     BigDecimal taxRate = nonNull(line.getTaxRate());
                     BigDecimal lineSubtotal = line.getQuantityOrdered().multiply(line.getUnitPrice());
@@ -614,7 +662,12 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                             .productId(line.getProductId())
                             .productName(product == null ? null : product.getName())
                             .productSku(product == null ? null : product.getSku())
+                            .unitOfMeasureId(line.getUnitOfMeasureId())
+                            .unitOfMeasureAbbreviation(unit == null ? null : unit.getAbbreviation())
+                            .conversionFactor(conversionFactor)
                             .quantityOrdered(line.getQuantityOrdered())
+                            .baseQuantityOrdered(line.getQuantityOrdered().multiply(conversionFactor))
+                            .baseQuantityDelivered(nonNull(line.getQuantityDelivered()).multiply(conversionFactor))
                             .unitPrice(line.getUnitPrice())
                             .discountPercent(discountPercent)
                             .discountAmount(discountAmount)

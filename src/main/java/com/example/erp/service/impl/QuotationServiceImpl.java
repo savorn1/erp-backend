@@ -16,6 +16,8 @@ import com.example.erp.entity.LeadActivity;
 import com.example.erp.entity.LeadActivityType;
 import com.example.erp.entity.LeadStatus;
 import com.example.erp.entity.Product;
+import com.example.erp.entity.ProductUom;
+import com.example.erp.entity.UnitOfMeasure;
 import com.example.erp.entity.Quotation;
 import com.example.erp.entity.QuotationLine;
 import com.example.erp.entity.QuotationStatus;
@@ -25,6 +27,8 @@ import com.example.erp.repository.CustomerRepository;
 import com.example.erp.repository.LeadActivityRepository;
 import com.example.erp.repository.LeadRepository;
 import com.example.erp.repository.ProductRepository;
+import com.example.erp.repository.ProductUomRepository;
+import com.example.erp.repository.UnitOfMeasureRepository;
 import com.example.erp.repository.QuotationLineRepository;
 import com.example.erp.repository.QuotationRepository;
 import com.example.erp.service.EmailService;
@@ -58,6 +62,8 @@ public class QuotationServiceImpl implements QuotationService {
     private final CompanyRepository companyRepository;
     private final CustomerRepository customerRepository;
     private final ProductRepository productRepository;
+    private final ProductUomRepository productUomRepository;
+    private final UnitOfMeasureRepository unitOfMeasureRepository;
     private final LeadRepository leadRepository;
     private final LeadActivityRepository leadActivityRepository;
     private final PdfRenderService pdfRenderService;
@@ -324,15 +330,52 @@ public class QuotationServiceImpl implements QuotationService {
     }
 
     private List<QuotationLine> saveLines(Long quotationId, List<QuotationLineRequest> requests) {
+        Map<Long, Product> products = requests.isEmpty() ? Map.of() : productRepository.findAllById(
+                requests.stream().map(QuotationLineRequest::getProductId).distinct().toList()
+        ).stream().collect(Collectors.toMap(Product::getId, p -> p));
+
         List<QuotationLine> lines = requests.stream()
-                .map(r -> QuotationLine.builder()
-                        .quotationId(quotationId)
-                        .productId(r.getProductId())
-                        .quantity(r.getQuantity())
-                        .unitPrice(r.getUnitPrice())
-                        .build())
+                .map(r -> {
+                    UnitSelection unit = resolveLineUnit(products.get(r.getProductId()), r.getUnitOfMeasureId());
+                    return QuotationLine.builder()
+                            .quotationId(quotationId)
+                            .productId(r.getProductId())
+                            .unitOfMeasureId(unit.unitOfMeasureId())
+                            .conversionFactor(unit.conversionFactor())
+                            .quantity(r.getQuantity())
+                            .unitPrice(r.getUnitPrice())
+                            .build();
+                })
                 .toList();
         return quotationLineRepository.saveAll(lines);
+    }
+
+    private record UnitSelection(Long unitOfMeasureId, BigDecimal conversionFactor) {}
+
+    // Same rule as SalesOrderServiceImpl — a quote converts into a sales order, so
+    // a unit that's legal here has to be legal there too.
+    private UnitSelection resolveLineUnit(Product product, Long requestedUnitOfMeasureId) {
+        // Deliberately tolerant: callers that require a real product validate it
+        // separately, and a product with no base unit configured predates UoM setup.
+        // Falling back to "no conversion" keeps this from changing which lines are
+        // allowed to save — it only adds the unit when there is one to add.
+        Long unitId = requestedUnitOfMeasureId != null ? requestedUnitOfMeasureId
+                : (product == null ? null : product.getUnitOfMeasureId());
+        if (product == null || unitId == null || unitId.equals(product.getUnitOfMeasureId())) {
+            return new UnitSelection(unitId, BigDecimal.ONE);
+        }
+        ProductUom productUom = productUomRepository
+                .findByProductIdAndVariantIdIsNullAndUnitOfMeasureId(product.getId(), unitId)
+                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST,
+                        "This unit is not configured for " + product.getName() + " — add it under the product's UOMs first"));
+        if (!productUom.isAllowSales()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "This unit is not allowed for selling " + product.getName());
+        }
+        return new UnitSelection(unitId, productUom.getConversionFactor());
+    }
+
+    private BigDecimal conversionFactorOf(QuotationLine line) {
+        return line.getConversionFactor() != null ? line.getConversionFactor() : BigDecimal.ONE;
     }
 
     private void validateLineProducts(List<QuotationLineRequest> lines, Long companyId) {
@@ -386,14 +429,24 @@ public class QuotationServiceImpl implements QuotationService {
                 lines.stream().map(QuotationLine::getProductId).distinct().toList()
         ).stream().collect(Collectors.toMap(Product::getId, p -> p));
 
+        Map<Long, UnitOfMeasure> units = unitOfMeasureRepository.findAllById(
+                lines.stream().map(QuotationLine::getUnitOfMeasureId).filter(java.util.Objects::nonNull).distinct().toList()
+        ).stream().collect(Collectors.toMap(UnitOfMeasure::getId, u -> u));
+
         List<QuotationLineResponse> lineResponses = lines.stream()
                 .map(line -> {
                     Product product = products.get(line.getProductId());
+                    UnitOfMeasure unit = units.get(line.getUnitOfMeasureId());
+                    BigDecimal conversionFactor = conversionFactorOf(line);
                     return QuotationLineResponse.builder()
                             .id(line.getId())
                             .productId(line.getProductId())
                             .productName(product == null ? null : product.getName())
                             .productSku(product == null ? null : product.getSku())
+                            .unitOfMeasureId(line.getUnitOfMeasureId())
+                            .unitOfMeasureAbbreviation(unit == null ? null : unit.getAbbreviation())
+                            .conversionFactor(conversionFactor)
+                            .baseQuantity(line.getQuantity().multiply(conversionFactor))
                             .quantity(line.getQuantity())
                             .unitPrice(line.getUnitPrice())
                             .lineTotal(line.getQuantity().multiply(line.getUnitPrice()))

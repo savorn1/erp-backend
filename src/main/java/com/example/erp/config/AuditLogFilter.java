@@ -28,11 +28,10 @@ import java.io.IOException;
 // copyBodyToResponse() in a finally block — this can never alter what the
 // client receives or affect the wrapped request's own transaction.
 //
-// Scope: only requests already classified APPROVE, plus WRITE requests to
-// the users/custom-roles modules — see RequestModuleAction for the
-// module/action vocabulary this reuses from PermissionAuthorizationManager.
-// Login/logout are outside /api/admin/** entirely and are recorded directly
-// by AuthServiceImpl instead.
+// Scope: every successful state-changing request under /api/admin/**. This
+// includes ordinary CRUD writes as well as approval actions, so financial,
+// inventory, configuration, and security changes share one append-only trail.
+// Login/logout are outside /api/admin/** and are recorded by AuthServiceImpl.
 public class AuditLogFilter extends OncePerRequestFilter {
 
     private final AuditLogService auditLogService;
@@ -63,8 +62,7 @@ public class AuditLogFilter extends OncePerRequestFilter {
         String module = RequestModuleAction.moduleOf(request.getRequestURI(), request.getContextPath());
         if (module == null) return;
         PermissionAction action = RequestModuleAction.actionOf(request);
-        boolean isSecurityModuleWrite = (module.equals("users") || module.equals("custom-roles")) && action == PermissionAction.WRITE;
-        if (action != PermissionAction.APPROVE && !isSecurityModuleWrite) return;
+        if (action == PermissionAction.READ || response.getStatus() < 200 || response.getStatus() >= 300) return;
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String actingUsername = authentication == null ? null : authentication.getName();
@@ -72,8 +70,11 @@ public class AuditLogFilter extends OncePerRequestFilter {
         Long sourceId = numberField(data, "id");
         Long companyId = numberField(data, "companyId");
 
+        String state = textField(data, "status");
+        String description = request.getMethod() + " " + request.getRequestURI()
+                + (state == null ? "" : " → " + state);
         auditLogService.record(companyId, module, action.name(), request.getMethod(), request.getRequestURI(),
-                sourceId, actingUsername, response.getStatus(), request.getMethod() + " " + request.getRequestURI());
+                sourceId, actingUsername, response.getStatus(), description);
     }
 
     private JsonNode readResponseData(ContentCachingResponseWrapper response) {
@@ -90,5 +91,11 @@ public class AuditLogFilter extends OncePerRequestFilter {
         if (data == null) return null;
         JsonNode node = data.path(field);
         return node.isNumber() ? node.asLong() : null;
+    }
+
+    private String textField(JsonNode data, String field) {
+        if (data == null) return null;
+        JsonNode node = data.path(field);
+        return node.isTextual() ? node.asText() : null;
     }
 }

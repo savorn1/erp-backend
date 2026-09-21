@@ -13,6 +13,8 @@ import com.example.erp.dto.RfqSupplierResponse;
 import com.example.erp.dto.UpdateRfqRequest;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.Product;
+import com.example.erp.entity.ProductUom;
+import com.example.erp.entity.UnitOfMeasure;
 import com.example.erp.entity.PurchaseOrder;
 import com.example.erp.entity.PurchaseOrderLine;
 import com.example.erp.entity.PurchaseOrderStatus;
@@ -28,6 +30,8 @@ import com.example.erp.entity.Warehouse;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.CompanyRepository;
 import com.example.erp.repository.ProductRepository;
+import com.example.erp.repository.ProductUomRepository;
+import com.example.erp.repository.UnitOfMeasureRepository;
 import com.example.erp.repository.PurchaseOrderLineRepository;
 import com.example.erp.repository.PurchaseOrderRepository;
 import com.example.erp.repository.PurchaseRequestRepository;
@@ -66,6 +70,8 @@ public class RfqServiceImpl implements RfqService {
     private final WarehouseRepository warehouseRepository;
     private final SupplierRepository supplierRepository;
     private final ProductRepository productRepository;
+    private final ProductUomRepository productUomRepository;
+    private final UnitOfMeasureRepository unitOfMeasureRepository;
     private final PurchaseRequestRepository purchaseRequestRepository;
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final PurchaseOrderLineRepository purchaseOrderLineRepository;
@@ -260,6 +266,11 @@ public class RfqServiceImpl implements RfqService {
                 .map(line -> PurchaseOrderLine.builder()
                         .purchaseOrderId(po.getId())
                         .productId(line.getProductId())
+                        // Suppliers quoted a price per the RFQ's unit, so the awarded
+                        // order has to inherit it — otherwise the price would be
+                        // reinterpreted against the product's base unit.
+                        .unitOfMeasureId(line.getUnitOfMeasureId())
+                        .conversionFactor(conversionFactorOf(line))
                         .quantityOrdered(line.getQuantity())
                         .unitCost(quotedPrices.get(line.getProductId()))
                         .build())
@@ -300,14 +311,51 @@ public class RfqServiceImpl implements RfqService {
     }
 
     private List<RfqLine> saveLines(Long rfqId, List<RfqLineRequest> requests) {
+        Map<Long, Product> products = requests.isEmpty() ? Map.of() : productRepository.findAllById(
+                requests.stream().map(RfqLineRequest::getProductId).distinct().toList()
+        ).stream().collect(Collectors.toMap(Product::getId, p -> p));
+
         List<RfqLine> lines = requests.stream()
-                .map(r -> RfqLine.builder()
-                        .rfqId(rfqId)
-                        .productId(r.getProductId())
-                        .quantity(r.getQuantity())
-                        .build())
+                .map(r -> {
+                    UnitSelection unit = resolveLineUnit(products.get(r.getProductId()), r.getUnitOfMeasureId());
+                    return RfqLine.builder()
+                            .rfqId(rfqId)
+                            .productId(r.getProductId())
+                            .unitOfMeasureId(unit.unitOfMeasureId())
+                            .conversionFactor(unit.conversionFactor())
+                            .quantity(r.getQuantity())
+                            .build();
+                })
                 .toList();
         return rfqLineRepository.saveAll(lines);
+    }
+
+    private record UnitSelection(Long unitOfMeasureId, BigDecimal conversionFactor) {}
+
+    // Same rule as PurchaseOrderServiceImpl — an awarded RFQ becomes a purchase
+    // order, so the unit quoted against has to be legal there too.
+    private UnitSelection resolveLineUnit(Product product, Long requestedUnitOfMeasureId) {
+        // Deliberately tolerant: callers that require a real product validate it
+        // separately, and a product with no base unit configured predates UoM setup.
+        // Falling back to "no conversion" keeps this from changing which lines are
+        // allowed to save — it only adds the unit when there is one to add.
+        Long unitId = requestedUnitOfMeasureId != null ? requestedUnitOfMeasureId
+                : (product == null ? null : product.getUnitOfMeasureId());
+        if (product == null || unitId == null || unitId.equals(product.getUnitOfMeasureId())) {
+            return new UnitSelection(unitId, BigDecimal.ONE);
+        }
+        ProductUom productUom = productUomRepository
+                .findByProductIdAndVariantIdIsNullAndUnitOfMeasureId(product.getId(), unitId)
+                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST,
+                        "This unit is not configured for " + product.getName() + " — add it under the product's UOMs first"));
+        if (!productUom.isAllowPurchase()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "This unit is not allowed for purchasing " + product.getName());
+        }
+        return new UnitSelection(unitId, productUom.getConversionFactor());
+    }
+
+    private BigDecimal conversionFactorOf(RfqLine line) {
+        return line.getConversionFactor() != null ? line.getConversionFactor() : BigDecimal.ONE;
     }
 
     private List<RfqSupplier> saveSuppliers(Long rfqId, List<Long> supplierIds) {
@@ -379,14 +427,24 @@ public class RfqServiceImpl implements RfqService {
                 lines.stream().map(RfqLine::getProductId).distinct().toList()
         ).stream().collect(Collectors.toMap(Product::getId, p -> p));
 
+        Map<Long, UnitOfMeasure> units = unitOfMeasureRepository.findAllById(
+                lines.stream().map(RfqLine::getUnitOfMeasureId).filter(java.util.Objects::nonNull).distinct().toList()
+        ).stream().collect(Collectors.toMap(UnitOfMeasure::getId, u -> u));
+
         List<RfqLineResponse> lineResponses = lines.stream()
                 .map(line -> {
                     Product product = products.get(line.getProductId());
+                    UnitOfMeasure unit = units.get(line.getUnitOfMeasureId());
+                    BigDecimal conversionFactor = conversionFactorOf(line);
                     return RfqLineResponse.builder()
                             .id(line.getId())
                             .productId(line.getProductId())
                             .productName(product == null ? null : product.getName())
                             .productSku(product == null ? null : product.getSku())
+                            .unitOfMeasureId(line.getUnitOfMeasureId())
+                            .unitOfMeasureAbbreviation(unit == null ? null : unit.getAbbreviation())
+                            .conversionFactor(conversionFactor)
+                            .baseQuantity(line.getQuantity().multiply(conversionFactor))
                             .quantity(line.getQuantity())
                             .build();
                 })

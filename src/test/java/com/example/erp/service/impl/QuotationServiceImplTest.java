@@ -13,6 +13,8 @@ import com.example.erp.repository.CustomerRepository;
 import com.example.erp.repository.LeadActivityRepository;
 import com.example.erp.repository.LeadRepository;
 import com.example.erp.repository.ProductRepository;
+import com.example.erp.repository.ProductUomRepository;
+import com.example.erp.repository.UnitOfMeasureRepository;
 import com.example.erp.repository.QuotationLineRepository;
 import com.example.erp.repository.QuotationRepository;
 import com.example.erp.service.EmailService;
@@ -47,6 +49,10 @@ class QuotationServiceImplTest {
     private CustomerRepository customerRepository;
     @Mock
     private ProductRepository productRepository;
+    @Mock
+    private ProductUomRepository productUomRepository;
+    @Mock
+    private UnitOfMeasureRepository unitOfMeasureRepository;
     @Mock
     private LeadRepository leadRepository;
     @Mock

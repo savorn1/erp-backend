@@ -176,7 +176,10 @@ public class DeliveryServiceImpl implements DeliveryService {
             }
             if (trackingType == ProductTrackingType.SERIAL) {
                 List<String> serials = lineRequest.getSerialNumbers();
-                int expected = lineRequest.getQuantityDelivered().stripTrailingZeros().intValueExact();
+                // Serials identify individual inventory units, so the count tracks the
+                // base quantity — delivering 2 BOX of 12 needs 24 serials, not 2.
+                int expected = baseQuantity(lineRequest.getQuantityDelivered(), soLine)
+                        .stripTrailingZeros().intValueExact();
                 if (serials == null || serials.size() != expected || serials.stream().anyMatch(s -> s == null || s.isBlank())) {
                     throw new AppException(HttpStatus.BAD_REQUEST,
                             product.getName() + " is serial-tracked — expected exactly " + expected + " serial number(s)");
@@ -209,6 +212,7 @@ public class DeliveryServiceImpl implements DeliveryService {
                     .salesOrderLineId(soLine.getId())
                     .productId(soLine.getProductId())
                     .quantityDelivered(lineRequest.getQuantityDelivered())
+                    .conversionFactor(conversionFactorOf(soLine))
                     .binId(lineRequest.getBinId())
                     .batchNumber(lineRequest.getBatchNumber())
                     .serialNumbersRaw(lineRequest.getSerialNumbers() == null ? null : String.join(",", lineRequest.getSerialNumbers()))
@@ -224,7 +228,7 @@ public class DeliveryServiceImpl implements DeliveryService {
     @Transactional
     public DeliveryResponse pickDelivery(Long id, String actingUsername) {
         Delivery delivery = find(id);
-        if (delivery.getStatus() != DeliveryStatus.PENDING) {
+        if (!delivery.getStatus().canTransitionTo(DeliveryStatus.PICKED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only pending deliveries can be picked");
         }
         delivery.setStatus(DeliveryStatus.PICKED);
@@ -238,7 +242,7 @@ public class DeliveryServiceImpl implements DeliveryService {
     @Transactional
     public DeliveryResponse packDelivery(Long id, String actingUsername) {
         Delivery delivery = find(id);
-        if (delivery.getStatus() != DeliveryStatus.PICKED) {
+        if (!delivery.getStatus().canTransitionTo(DeliveryStatus.PACKED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only picked deliveries can be packed");
         }
         delivery.setStatus(DeliveryStatus.PACKED);
@@ -252,7 +256,7 @@ public class DeliveryServiceImpl implements DeliveryService {
     @Transactional
     public DeliveryResponse shipDelivery(Long id, String actingUsername) {
         Delivery delivery = find(id);
-        if (delivery.getStatus() != DeliveryStatus.PACKED) {
+        if (!delivery.getStatus().canTransitionTo(DeliveryStatus.SHIPPED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only packed deliveries can be shipped");
         }
         SalesOrder so = salesOrderRepository.findById(delivery.getSalesOrderId())
@@ -282,8 +286,11 @@ public class DeliveryServiceImpl implements DeliveryService {
                 resolvedBatchByLine.put(line.getId(), batch);
             }
 
+            // Stock is held in the product's inventory unit, so the line has to be
+            // converted before comparing — a 2 BOX line needs 24 PCS on hand, not 2.
+            BigDecimal baseQuantityDelivered = baseQuantity(line);
             BigDecimal available = availableQuantity(line.getProductId(), so.getWarehouseId(), line.getBinId());
-            if (line.getQuantityDelivered().compareTo(available) > 0 && !settings.isAllowNegativeStock()) {
+            if (baseQuantityDelivered.compareTo(available) > 0 && !settings.isAllowNegativeStock()) {
                 throw new AppException(HttpStatus.BAD_REQUEST,
                         "Insufficient stock on hand (" + available + ") for " + productLabel);
             }
@@ -328,9 +335,12 @@ public class DeliveryServiceImpl implements DeliveryService {
             soLine.setQuantityDelivered(soLine.getQuantityDelivered().add(line.getQuantityDelivered()));
             salesOrderLineRepository.save(soLine);
 
-            decreaseStock(so.getCompanyId(), line.getProductId(), so.getWarehouseId(), line.getBinId(), line.getQuantityDelivered(), settings.isAllowNegativeStock());
+            // Everything below moves inventory, so all of it works in base units —
+            // only the SO line's own quantityDelivered above stays in the line's unit.
+            BigDecimal baseQuantityDelivered = baseQuantity(line);
+            decreaseStock(so.getCompanyId(), line.getProductId(), so.getWarehouseId(), line.getBinId(), baseQuantityDelivered, settings.isAllowNegativeStock());
             if (settings.isReserveStock()) {
-                releaseReservation(line.getProductId(), so.getCompanyId(), so.getWarehouseId(), line.getQuantityDelivered());
+                releaseReservation(line.getProductId(), so.getCompanyId(), so.getWarehouseId(), baseQuantityDelivered);
             }
             stockMovementRepository.save(StockMovement.builder()
                     .companyId(so.getCompanyId())
@@ -338,7 +348,7 @@ public class DeliveryServiceImpl implements DeliveryService {
                     .warehouseId(so.getWarehouseId())
                     .binId(line.getBinId())
                     .type(StockMovementType.ISSUE)
-                    .quantityDelta(line.getQuantityDelivered().negate())
+                    .quantityDelta(baseQuantityDelivered.negate())
                     .referenceType("DELIVERY")
                     .referenceId(delivery.getId())
                     .createdBy(actingUsername)
@@ -347,7 +357,11 @@ public class DeliveryServiceImpl implements DeliveryService {
 
         boolean fullyDelivered = soLines.values().stream()
                 .allMatch(l -> l.getQuantityDelivered().compareTo(l.getQuantityOrdered()) >= 0);
-        so.setStatus(fullyDelivered ? SalesOrderStatus.DELIVERED : SalesOrderStatus.PARTIALLY_DELIVERED);
+        SalesOrderStatus nextOrderStatus = fullyDelivered ? SalesOrderStatus.DELIVERED : SalesOrderStatus.PARTIALLY_DELIVERED;
+        if (!so.getStatus().canTransitionTo(nextOrderStatus)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Sales order cannot be updated from " + so.getStatus() + " to " + nextOrderStatus);
+        }
+        so.setStatus(nextOrderStatus);
         salesOrderRepository.save(so);
 
         delivery.setStatus(DeliveryStatus.SHIPPED);
@@ -361,7 +375,7 @@ public class DeliveryServiceImpl implements DeliveryService {
     @Transactional
     public DeliveryResponse completeDelivery(Long id, String actingUsername) {
         Delivery delivery = find(id);
-        if (delivery.getStatus() != DeliveryStatus.SHIPPED) {
+        if (!delivery.getStatus().canTransitionTo(DeliveryStatus.DELIVERED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only shipped deliveries can be marked delivered");
         }
         delivery.setStatus(DeliveryStatus.DELIVERED);
@@ -375,8 +389,7 @@ public class DeliveryServiceImpl implements DeliveryService {
     @Transactional
     public DeliveryResponse cancelDelivery(Long id) {
         Delivery delivery = find(id);
-        if (delivery.getStatus() == DeliveryStatus.SHIPPED || delivery.getStatus() == DeliveryStatus.DELIVERED
-                || delivery.getStatus() == DeliveryStatus.CANCELLED) {
+        if (!delivery.getStatus().canTransitionTo(DeliveryStatus.CANCELLED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only pending, picked, or packed deliveries can be cancelled");
         }
         delivery.setStatus(DeliveryStatus.CANCELLED);
@@ -397,6 +410,23 @@ public class DeliveryServiceImpl implements DeliveryService {
     // the warehouse, rather than only the unbinned row. Without this, a
     // product received into a bin via GoodsReceipt looks out of stock
     // whenever a delivery line leaves "bin" unset.
+    // Sales order lines (and the delivery lines posted against them) can be in a
+    // sales unit like BOX while stock is kept in the product's inventory unit.
+    // These convert one to the other; a null factor means the line predates UoM
+    // support and is already in the base unit.
+    private BigDecimal conversionFactorOf(SalesOrderLine soLine) {
+        return soLine.getConversionFactor() != null ? soLine.getConversionFactor() : BigDecimal.ONE;
+    }
+
+    private BigDecimal baseQuantity(BigDecimal quantityInLineUnit, SalesOrderLine soLine) {
+        return quantityInLineUnit.multiply(conversionFactorOf(soLine));
+    }
+
+    private BigDecimal baseQuantity(DeliveryLine line) {
+        BigDecimal factor = line.getConversionFactor() != null ? line.getConversionFactor() : BigDecimal.ONE;
+        return line.getQuantityDelivered().multiply(factor);
+    }
+
     private BigDecimal availableQuantity(Long productId, Long warehouseId, Long binId) {
         if (binId != null) {
             return stockLevelRepository.findByProductIdAndWarehouseIdAndBinId(productId, warehouseId, binId)

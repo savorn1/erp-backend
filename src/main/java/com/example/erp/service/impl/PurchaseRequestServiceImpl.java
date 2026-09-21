@@ -14,6 +14,8 @@ import com.example.erp.dto.UpdatePurchaseRequestRequest;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.Department;
 import com.example.erp.entity.Product;
+import com.example.erp.entity.ProductUom;
+import com.example.erp.entity.UnitOfMeasure;
 import com.example.erp.entity.PurchaseRequest;
 import com.example.erp.entity.PurchaseRequestLine;
 import com.example.erp.entity.PurchaseRequestSource;
@@ -22,6 +24,8 @@ import com.example.erp.exception.AppException;
 import com.example.erp.repository.CompanyRepository;
 import com.example.erp.repository.DepartmentRepository;
 import com.example.erp.repository.ProductRepository;
+import com.example.erp.repository.ProductUomRepository;
+import com.example.erp.repository.UnitOfMeasureRepository;
 import com.example.erp.repository.PurchaseRequestLineRepository;
 import com.example.erp.repository.PurchaseRequestRepository;
 import com.example.erp.service.InventoryReportService;
@@ -51,6 +55,8 @@ public class PurchaseRequestServiceImpl implements PurchaseRequestService {
     private final CompanyRepository companyRepository;
     private final DepartmentRepository departmentRepository;
     private final ProductRepository productRepository;
+    private final ProductUomRepository productUomRepository;
+    private final UnitOfMeasureRepository unitOfMeasureRepository;
     private final InventoryReportService inventoryReportService;
 
     private static final BigDecimal TWO = BigDecimal.valueOf(2);
@@ -250,15 +256,55 @@ public class PurchaseRequestServiceImpl implements PurchaseRequestService {
     }
 
     private List<PurchaseRequestLine> saveLines(Long purchaseRequestId, List<PurchaseRequestLineRequest> requests) {
+        Map<Long, Product> products = requests.isEmpty() ? Map.of() : productRepository.findAllById(
+                requests.stream().map(PurchaseRequestLineRequest::getProductId).distinct().toList()
+        ).stream().collect(Collectors.toMap(Product::getId, p -> p));
+
         List<PurchaseRequestLine> lines = requests.stream()
-                .map(r -> PurchaseRequestLine.builder()
-                        .purchaseRequestId(purchaseRequestId)
-                        .productId(r.getProductId())
-                        .quantity(r.getQuantity())
-                        .notes(r.getNotes())
-                        .build())
+                .map(r -> {
+                    UnitSelection unit = resolveLineUnit(products.get(r.getProductId()), r.getUnitOfMeasureId());
+                    return PurchaseRequestLine.builder()
+                            .purchaseRequestId(purchaseRequestId)
+                            .productId(r.getProductId())
+                            .unitOfMeasureId(unit.unitOfMeasureId())
+                            .conversionFactor(unit.conversionFactor())
+                            .quantity(r.getQuantity())
+                            .notes(r.getNotes())
+                            .build();
+                })
                 .toList();
         return lineRepository.saveAll(lines);
+    }
+
+    private record UnitSelection(Long unitOfMeasureId, BigDecimal conversionFactor) {}
+
+    // Mirrors PurchaseOrderServiceImpl.resolveLineUnit — a request is the upstream
+    // of a purchase order, so the same units have to be legal in both places or an
+    // approved request couldn't be turned into an order.
+    private UnitSelection resolveLineUnit(Product product, Long requestedUnitOfMeasureId) {
+        // Deliberately tolerant: callers that require a real product validate it
+        // separately, and a product with no base unit configured predates UoM setup.
+        // Falling back to "no conversion" keeps this from changing which lines are
+        // allowed to save — it only adds the unit when there is one to add.
+        Long unitId = requestedUnitOfMeasureId != null ? requestedUnitOfMeasureId
+                : (product == null ? null : product.getUnitOfMeasureId());
+        if (product == null || unitId == null || unitId.equals(product.getUnitOfMeasureId())) {
+            return new UnitSelection(unitId, BigDecimal.ONE);
+        }
+        ProductUom productUom = productUomRepository
+                .findByProductIdAndVariantIdIsNullAndUnitOfMeasureId(product.getId(), unitId)
+                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST,
+                        "This unit is not configured for " + product.getName() + " — add it under the product's UOMs first"));
+        if (!productUom.isAllowPurchase()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "This unit is not allowed for purchasing " + product.getName());
+        }
+        return new UnitSelection(unitId, productUom.getConversionFactor());
+    }
+
+    // Lines saved before unitOfMeasureId/conversionFactor existed read back as the
+    // product's own base unit at factor 1.
+    private BigDecimal conversionFactorOf(PurchaseRequestLine line) {
+        return line.getConversionFactor() != null ? line.getConversionFactor() : BigDecimal.ONE;
     }
 
     private void validateLineProducts(List<PurchaseRequestLineRequest> lines, Long companyId) {
@@ -300,15 +346,25 @@ public class PurchaseRequestServiceImpl implements PurchaseRequestService {
                 lines.stream().map(PurchaseRequestLine::getProductId).distinct().toList()
         ).stream().collect(Collectors.toMap(Product::getId, p -> p));
 
+        Map<Long, UnitOfMeasure> units = unitOfMeasureRepository.findAllById(
+                lines.stream().map(PurchaseRequestLine::getUnitOfMeasureId).filter(java.util.Objects::nonNull).distinct().toList()
+        ).stream().collect(Collectors.toMap(UnitOfMeasure::getId, u -> u));
+
         List<PurchaseRequestLineResponse> lineResponses = lines.stream()
                 .map(line -> {
                     Product product = products.get(line.getProductId());
+                    UnitOfMeasure unit = units.get(line.getUnitOfMeasureId());
+                    BigDecimal conversionFactor = conversionFactorOf(line);
                     return PurchaseRequestLineResponse.builder()
                             .id(line.getId())
                             .productId(line.getProductId())
                             .productName(product == null ? null : product.getName())
                             .productSku(product == null ? null : product.getSku())
+                            .unitOfMeasureId(line.getUnitOfMeasureId())
+                            .unitOfMeasureAbbreviation(unit == null ? null : unit.getAbbreviation())
+                            .conversionFactor(conversionFactor)
                             .quantity(line.getQuantity())
+                            .baseQuantity(line.getQuantity().multiply(conversionFactor))
                             .notes(line.getNotes())
                             .build();
                 })

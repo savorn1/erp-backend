@@ -17,7 +17,16 @@ public class SalesOrderLineResponse {
     private Long productId;
     private String productName;
     private String productSku;
+    private Long unitOfMeasureId;
+    private String unitOfMeasureAbbreviation;
+    // How many base units equal 1 of unitOfMeasureId — 1 when the line is
+    // already in the product's base unit.
+    private BigDecimal conversionFactor;
     private BigDecimal quantityOrdered;
+    // quantityOrdered/quantityDelivered restated in the product's inventory
+    // unit, so callers comparing against stock don't have to convert.
+    private BigDecimal baseQuantityOrdered;
+    private BigDecimal baseQuantityDelivered;
     private BigDecimal unitPrice;
     private BigDecimal discountPercent;
     private BigDecimal discountAmount;

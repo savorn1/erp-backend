@@ -221,7 +221,7 @@ public class PurchaseInvoiceServiceImpl implements PurchaseInvoiceService {
     @Transactional
     public PurchaseInvoiceResponse approvePurchaseInvoice(Long id, String actingUsername) {
         PurchaseInvoice invoice = find(id);
-        if (invoice.getStatus() != PurchaseInvoiceStatus.DRAFT) {
+        if (!invoice.getStatus().canTransitionTo(PurchaseInvoiceStatus.APPROVED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft purchase invoices can be approved");
         }
         List<PurchaseInvoiceLine> lines = purchaseInvoiceLineRepository.findByPurchaseInvoiceId(id);
@@ -248,8 +248,8 @@ public class PurchaseInvoiceServiceImpl implements PurchaseInvoiceService {
     @Transactional
     public PurchaseInvoiceResponse cancelPurchaseInvoice(Long id, String actingUsername) {
         PurchaseInvoice invoice = find(id);
-        if (invoice.getStatus() == PurchaseInvoiceStatus.CANCELLED) {
-            throw new AppException(HttpStatus.BAD_REQUEST, "Purchase invoice is already cancelled");
+        if (!invoice.getStatus().canTransitionTo(PurchaseInvoiceStatus.CANCELLED)) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Only draft or approved purchase invoices can be cancelled");
         }
         List<PurchaseInvoiceLine> lines = purchaseInvoiceLineRepository.findByPurchaseInvoiceId(id);
 

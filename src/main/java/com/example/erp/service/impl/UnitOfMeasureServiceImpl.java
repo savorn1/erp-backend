@@ -106,12 +106,28 @@ public class UnitOfMeasureServiceImpl implements UnitOfMeasureService {
         boolean wasBase = Boolean.TRUE.equals(uom.getBaseUnit());
         Long oldCategoryId = uom.getCategoryId();
 
+        // Moving the current base to a different category would leave the old
+        // category pointing at a unit which no longer belongs to it. Pick a
+        // replacement base in the old category first instead.
+        if (wasBase && oldCategoryId != null && !Objects.equals(oldCategoryId, request.getCategoryId())) {
+            throw new AppException(HttpStatus.BAD_REQUEST,
+                    "Cannot move a category's base unit — assign a different base unit first");
+        }
+
         if (wasBase && !wantsBase && oldCategoryId != null) {
             UomCategory oldCategory = categoryOf(oldCategoryId);
             if (oldCategory != null && id.equals(oldCategory.getBaseUnitId())) {
                 throw new AppException(HttpStatus.BAD_REQUEST,
                         "Cannot unset the base unit of a category — assign a different unit as base instead");
             }
+        }
+
+        // Conversion factors are anchored to the category base. Replacing it
+        // without recalculating every factor would silently make conversions
+        // incorrect, so reject the change until the category is reconfigured.
+        if (wantsBase && !id.equals(category.getBaseUnitId()) && categoryHasConversions(category.getId())) {
+            throw new AppException(HttpStatus.BAD_REQUEST,
+                    "Cannot change a category's base unit while it has conversions — remove or recreate its conversions first");
         }
 
         uom.setName(request.getName());
@@ -128,7 +144,10 @@ public class UnitOfMeasureServiceImpl implements UnitOfMeasureService {
         // where those rows are actually managed now.
         boolean categoryChanged = !Objects.equals(oldCategoryId, uom.getCategoryId());
         if (categoryChanged) {
-            uomConversionRepository.deleteByFromUnitOfMeasureId(uom.getId());
+            // Both incoming and outgoing rows become invalid after a unit
+            // changes category. Keeping an incoming direct row would bypass
+            // the category check in a conversion request.
+            uomConversionRepository.deleteByFromUnitOfMeasureIdOrToUnitOfMeasureId(uom.getId(), uom.getId());
         }
         if (wantsBase) {
             setCategoryBaseUnit(category, uom);
@@ -167,6 +186,11 @@ public class UnitOfMeasureServiceImpl implements UnitOfMeasureService {
         category.setBaseUnitId(newBaseUnit.getId());
         uomCategoryRepository.save(category);
         uomConversionRepository.deleteByFromUnitOfMeasureId(newBaseUnit.getId());
+    }
+
+    private boolean categoryHasConversions(Long categoryId) {
+        List<Long> unitIds = repository.findByCategoryId(categoryId).stream().map(UnitOfMeasure::getId).toList();
+        return !unitIds.isEmpty() && uomConversionRepository.existsByFromUnitOfMeasureIdInOrToUnitOfMeasureIdIn(unitIds, unitIds);
     }
 
     private UomCategory requireCategory(Long categoryId) {
