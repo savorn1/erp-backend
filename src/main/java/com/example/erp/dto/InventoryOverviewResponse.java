@@ -20,6 +20,11 @@ public class InventoryOverviewResponse {
     private String warehouseName;
 
     // Sum of StockLevel.quantityOnHand across every bin in this warehouse.
+    // The product's inventory unit. Every quantity below is in this unit, and
+    // without it the numbers are just bare figures — 40 bottles and 40 pallets
+    // look identical in the grid.
+    private String unitOfMeasureAbbreviation;
+
     private BigDecimal currentStock;
     // Quantity on outstanding submitted/partially-delivered sales orders —
     // still physically on hand, but already spoken for.

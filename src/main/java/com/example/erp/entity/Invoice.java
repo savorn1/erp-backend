@@ -74,4 +74,16 @@ public class Invoice {
 
     @Column(name = "exchange_rate", precision = 19, scale = 6)
     private BigDecimal exchangeRate;
+
+    // The status this document held when it was cancelled or rejected.
+    // Overwriting `status` destroys the only record of how far the workflow
+    // actually got, which is what decides whether anything has to be unwound —
+    // reserved stock, a posted receipt — so it is captured on the way past.
+    //
+    // Nullable, and not only for ddl-auto=update: rows cancelled before this
+    // existed genuinely have nothing to report, and the UI shows no progress
+    // rather than inventing some.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "cancelled_from_status")
+    private InvoiceStatus cancelledFromStatus;
 }

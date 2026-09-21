@@ -229,6 +229,8 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         if (!po.getStatus().canTransitionTo(PurchaseOrderStatus.CANCELLED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft, submitted, approved, or sent purchase orders can be cancelled");
         }
+        // Captured before the overwrite — this is the only record of how far the workflow got.
+        po.setCancelledFromStatus(po.getStatus());
         po.setStatus(PurchaseOrderStatus.CANCELLED);
         purchaseOrderRepository.save(po);
         approvalWorkflowService.clearApprovals("PURCHASE_ORDER", id);
@@ -516,6 +518,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 .orderDate(po.getOrderDate())
                 .expectedDate(po.getExpectedDate())
                 .status(po.getStatus().name())
+                .cancelledFromStatus(po.getCancelledFromStatus() == null ? null : po.getCancelledFromStatus().name())
                 .notes(po.getNotes())
                 .createdBy(po.getCreatedBy())
                 .subtotal(subtotal)

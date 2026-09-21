@@ -30,6 +30,9 @@ public class ProductTypeServiceImpl implements ProductTypeService {
     @Transactional(readOnly = true)
     public PageResponse<ProductTypeResponse> list(ProductTypeFilterRequest filter) {
         List<Specification<ProductType>> conditions = new ArrayList<>();
+        if (filter.getCode() != null) {
+            conditions.add((root, query, cb) -> cb.equal(root.get("code"), filter.getCode()));
+        }
         if (filter.getName() != null && !filter.getName().isBlank()) {
             conditions.add((root, query, cb) ->
                     cb.like(cb.lower(root.get("name")), "%" + filter.getName().toLowerCase() + "%"));
@@ -55,7 +58,11 @@ public class ProductTypeServiceImpl implements ProductTypeService {
         if (repository.existsByName(request.getName())) {
             throw new AppException(HttpStatus.CONFLICT, "Type name already taken: " + request.getName());
         }
+        // No uniqueness check on the code: several types can share a kind
+        // ("Spare parts" and "Packaging" are both CONSUMABLE). The name is the
+        // unique handle; the code only says how the system should treat the type.
         ProductType type = ProductType.builder()
+                .code(request.getCode())
                 .name(request.getName())
                 .active(request.isActive())
                 .build();
@@ -70,6 +77,7 @@ public class ProductTypeServiceImpl implements ProductTypeService {
         if (repository.existsByNameAndIdNot(request.getName(), id)) {
             throw new AppException(HttpStatus.CONFLICT, "Type name already taken: " + request.getName());
         }
+        type.setCode(request.getCode());
         type.setName(request.getName());
         type.setActive(request.isActive());
         repository.save(type);
@@ -90,6 +98,7 @@ public class ProductTypeServiceImpl implements ProductTypeService {
     private ProductTypeResponse toResponse(ProductType type) {
         return ProductTypeResponse.builder()
                 .id(type.getId())
+                .code(type.getCode() == null ? null : type.getCode().name())
                 .name(type.getName())
                 .active(type.isActive())
                 .build();

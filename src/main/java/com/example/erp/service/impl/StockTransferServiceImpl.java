@@ -378,6 +378,8 @@ public class StockTransferServiceImpl implements StockTransferService {
         if (transfer.getStatus() != StockTransferStatus.REQUESTED && transfer.getStatus() != StockTransferStatus.APPROVED) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only requested or approved transfers can be cancelled");
         }
+        // Captured before the overwrite — this is the only record of how far the workflow got.
+        transfer.setCancelledFromStatus(transfer.getStatus());
         transfer.setStatus(StockTransferStatus.CANCELLED);
         stockTransferRepository.save(transfer);
         return toFullResponse(transfer, stockTransferLineRepository.findByStockTransferId(id));
@@ -589,6 +591,7 @@ public class StockTransferServiceImpl implements StockTransferService {
                 .shipDate(transfer.getShipDate())
                 .receiveDate(transfer.getReceiveDate())
                 .status(transfer.getStatus().name())
+                .cancelledFromStatus(transfer.getCancelledFromStatus() == null ? null : transfer.getCancelledFromStatus().name())
                 .notes(transfer.getNotes())
                 .requestedBy(transfer.getRequestedBy())
                 .approvedBy(transfer.getApprovedBy())

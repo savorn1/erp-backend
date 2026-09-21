@@ -1,11 +1,15 @@
 package com.example.erp.dto;
 
+import com.example.erp.entity.ProductTypeCode;
+
 import lombok.Data;
 import org.springdoc.core.annotations.ParameterObject;
 
 @Data
 @ParameterObject
 public class ProductTypeFilterRequest {
+
+    private ProductTypeCode code;
 
     private String name;
     private Boolean active;

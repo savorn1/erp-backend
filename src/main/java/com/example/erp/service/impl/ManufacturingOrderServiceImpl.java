@@ -390,6 +390,8 @@ public class ManufacturingOrderServiceImpl implements ManufacturingOrderService 
         if (mo.getStatus() != ManufacturingOrderStatus.DRAFT && mo.getStatus() != ManufacturingOrderStatus.RELEASED) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft or released manufacturing orders can be cancelled — materials have already been consumed");
         }
+        // Captured before the overwrite — this is the only record of how far the workflow got.
+        mo.setCancelledFromStatus(mo.getStatus());
         mo.setStatus(ManufacturingOrderStatus.CANCELLED);
         orderRepository.save(mo);
         return toFullResponse(mo, materialRepository.findByManufacturingOrderId(id));
@@ -589,6 +591,7 @@ public class ManufacturingOrderServiceImpl implements ManufacturingOrderService 
                 .scrapQuantity(mo.getScrapQuantity())
                 .scrapReason(mo.getScrapReason())
                 .status(mo.getStatus().name())
+                .cancelledFromStatus(mo.getCancelledFromStatus() == null ? null : mo.getCancelledFromStatus().name())
                 .qualityStatus(mo.getQualityStatus() == null ? null : mo.getQualityStatus().name())
                 .qualityNotes(mo.getQualityNotes())
                 .qualityCheckedBy(mo.getQualityCheckedBy())

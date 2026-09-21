@@ -116,6 +116,12 @@ public class LeadServiceImpl implements LeadService {
     @Override
     @Transactional
     public LeadResponse createLead(CreateLeadRequest request, String actingUsername) {
+        // Checked before any lookup: it depends only on the request, and
+        // Lead.isEditable() refuses WON/LOST, so a lead created in one of
+        // those could never be edited or moved again.
+        if (request.getStatus() == LeadStatus.WON || request.getStatus() == LeadStatus.LOST) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "A lead cannot be created directly as " + request.getStatus());
+        }
         requireCompany(request.getCompanyId());
         if (request.getAssignedToUserId() != null) {
             requireUser(request.getAssignedToUserId(), request.getCompanyId());
@@ -141,9 +147,15 @@ public class LeadServiceImpl implements LeadService {
                 .customerId(request.getCustomerId())
                 .createdBy(actingUsername)
                 .build();
+        if (request.getStatus() != null) {
+            lead.setStatus(request.getStatus());
+        }
         leadRepository.save(lead);
 
-        recordActivity(lead.getId(), LeadActivityType.CREATED, "Lead created", actingUsername);
+        // Naming the starting column in the activity log, rather than leaving
+        // a bare "Lead created" that implies it began at NEW.
+        recordActivity(lead.getId(), LeadActivityType.CREATED,
+                lead.getStatus() == LeadStatus.NEW ? "Lead created" : "Lead created in " + lead.getStatus(), actingUsername);
         if (request.getAssignedToUserId() != null) {
             recordActivity(lead.getId(), LeadActivityType.ASSIGNED,
                     "Assigned to " + usernameOf(request.getAssignedToUserId()), actingUsername);

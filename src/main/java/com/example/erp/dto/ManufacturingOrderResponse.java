@@ -34,6 +34,11 @@ public class ManufacturingOrderResponse {
     private BigDecimal scrapQuantity;
     private String scrapReason;
     private String status;
+
+    // Where the workflow actually got to, for documents that were
+    // cancelled or rejected. Null when unknown — including every row
+    // cancelled before this was recorded.
+    private String cancelledFromStatus;
     private String qualityStatus;
     private String qualityNotes;
     private String qualityCheckedBy;

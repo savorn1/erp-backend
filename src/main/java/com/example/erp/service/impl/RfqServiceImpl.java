@@ -116,6 +116,7 @@ public class RfqServiceImpl implements RfqService {
                 .rfqNumber(rfq.getRfqNumber())
                 .issueDate(rfq.getIssueDate())
                 .status(rfq.getStatus().name())
+                .cancelledFromStatus(rfq.getCancelledFromStatus() == null ? null : rfq.getCancelledFromStatus().name())
                 .notes(rfq.getNotes())
                 .createdBy(rfq.getCreatedBy())
                 .awardedSupplierId(rfq.getAwardedSupplierId())
@@ -292,6 +293,8 @@ public class RfqServiceImpl implements RfqService {
         if (rfq.getStatus() != RfqStatus.DRAFT && rfq.getStatus() != RfqStatus.SENT) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only draft or sent RFQs can be cancelled");
         }
+        // Captured before the overwrite — this is the only record of how far the workflow got.
+        rfq.setCancelledFromStatus(rfq.getStatus());
         rfq.setStatus(RfqStatus.CANCELLED);
         rfqRepository.save(rfq);
         return toFullResponse(rfq, rfqLineRepository.findByRfqId(id), rfqSupplierRepository.findByRfqId(id));
@@ -500,6 +503,7 @@ public class RfqServiceImpl implements RfqService {
                 .rfqNumber(rfq.getRfqNumber())
                 .issueDate(rfq.getIssueDate())
                 .status(rfq.getStatus().name())
+                .cancelledFromStatus(rfq.getCancelledFromStatus() == null ? null : rfq.getCancelledFromStatus().name())
                 .notes(rfq.getNotes())
                 .createdBy(rfq.getCreatedBy())
                 .awardedSupplierId(rfq.getAwardedSupplierId())

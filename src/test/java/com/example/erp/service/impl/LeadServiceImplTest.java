@@ -124,4 +124,68 @@ class LeadServiceImplTest {
         assertThat(lead.getStatus()).isEqualTo(LeadStatus.LOST);
         assertThat(lead.getClosedAt()).isNotNull();
     }
+
+    private Lead savedLead;
+
+    @Test
+    void aLeadCreatedForABoardColumnStartsInThatColumn() {
+        // Dragging a brand-new lead from New to Quotation is the thing this
+        // avoids; it also keeps the activity log honest about where it began.
+        when(companyRepository.findById(1L)).thenReturn(Optional.of(Company.builder().id(1L).build()));
+        when(leadRepository.save(any(Lead.class))).thenAnswer(invocation -> {
+            Lead saved = invocation.getArgument(0);
+            if (saved.getId() == null) saved.setId(9L);
+            savedLead = saved;
+            return saved;
+        });
+        // recordActivity reads the lead back.
+        when(leadRepository.findById(9L)).thenAnswer(invocation -> Optional.ofNullable(savedLead));
+
+        CreateLeadRequest request = new CreateLeadRequest();
+        request.setCompanyId(1L);
+        request.setContactName("Dana");
+        request.setSource(LeadSource.WEBSITE);
+        request.setStatus(LeadStatus.QUOTATION);
+
+        var response = leadService.createLead(request, "tester");
+
+        assertThat(response.getStatus()).isEqualTo(LeadStatus.QUOTATION.name());
+    }
+
+    @Test
+    void aLeadCreatedWithNoStatusStillStartsAsNew() {
+        when(companyRepository.findById(1L)).thenReturn(Optional.of(Company.builder().id(1L).build()));
+        when(leadRepository.save(any(Lead.class))).thenAnswer(invocation -> {
+            Lead saved = invocation.getArgument(0);
+            if (saved.getId() == null) saved.setId(9L);
+            savedLead = saved;
+            return saved;
+        });
+        // recordActivity reads the lead back.
+        when(leadRepository.findById(9L)).thenAnswer(invocation -> Optional.ofNullable(savedLead));
+
+        CreateLeadRequest request = new CreateLeadRequest();
+        request.setCompanyId(1L);
+        request.setContactName("Dana");
+        request.setSource(LeadSource.WEBSITE);
+
+        var response = leadService.createLead(request, "tester");
+
+        assertThat(response.getStatus()).isEqualTo(LeadStatus.NEW.name());
+    }
+
+    @Test
+    void aLeadCannotBeCreatedAlreadyClosed() {
+        // Lead.isEditable() refuses WON/LOST, so a lead created there could
+        // never be edited or moved again — a dead row by construction.
+        CreateLeadRequest request = new CreateLeadRequest();
+        request.setCompanyId(1L);
+        request.setContactName("Dana");
+        request.setSource(LeadSource.WEBSITE);
+        request.setStatus(LeadStatus.WON);
+
+        assertThatThrownBy(() -> leadService.createLead(request, "tester"))
+                .isInstanceOf(AppException.class)
+                .hasMessageContaining("cannot be created directly as WON");
+    }
 }

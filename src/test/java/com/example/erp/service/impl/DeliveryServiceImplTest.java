@@ -181,6 +181,28 @@ class DeliveryServiceImplTest {
         assertThat(stockLevel.getQuantityOnHand()).isEqualByComparingTo("8.5");
     }
 
+    @Test
+    void shippingAServiceLineMovesNoStock() {
+        // A non-stockable product (labour, delivery charge, consulting) has no
+        // stock to issue. Before the `stockable` flag this threw "Insufficient
+        // stock on hand" and blocked the whole delivery.
+        Product installation = Product.builder().name("Installation").trackingType(ProductTrackingType.NONE).build();
+        installation.setId(PRODUCT_ID);
+        installation.setStockable(false);
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(installation));
+
+        SalesOrderLine soLine = givenLine(new BigDecimal("2"), null, BigDecimal.ZERO);
+
+        service.shipDelivery(DELIVERY_ID, "tester");
+
+        // The order line is still credited, so the order can complete...
+        assertThat(soLine.getQuantityDelivered()).isEqualByComparingTo("2");
+        // ...but nothing touched inventory.
+        assertThat(stockLevel.getQuantityOnHand()).isEqualByComparingTo("0");
+        verify(stockMovementRepository, never()).save(any());
+        verify(stockLevelRepository, never()).save(any());
+    }
+
     /** Wires up one delivery line against one SO line, with the given stock on hand. */
     private SalesOrderLine givenLine(BigDecimal quantityInLineUnit, BigDecimal conversionFactor, BigDecimal onHand) {
         SalesOrderLine soLine = SalesOrderLine.builder()

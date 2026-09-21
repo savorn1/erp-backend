@@ -19,6 +19,7 @@ import com.example.erp.entity.RmaRequest;
 import com.example.erp.entity.RmaResolutionType;
 import com.example.erp.entity.RmaStatus;
 import com.example.erp.entity.SerialNumber;
+import com.example.erp.entity.SerialNumberStatus;
 import com.example.erp.entity.StockLevel;
 import com.example.erp.entity.Warehouse;
 import com.example.erp.exception.AppException;
@@ -176,13 +177,17 @@ public class RmaServiceImpl implements RmaService {
             for (RmaLine line : lines) {
                 increaseStock(rma.getCompanyId(), line.getProductId(), rma.getWarehouseId(), line.getQuantity());
             }
+            returnSerialsToStock(lines);
         } else if (request.getResolutionType() == RmaResolutionType.REPLACEMENT) {
             for (RmaLine line : lines) {
                 increaseStock(rma.getCompanyId(), line.getProductId(), rma.getWarehouseId(), line.getQuantity());
                 decreaseStock(rma.getCompanyId(), line.getProductId(), rma.getWarehouseId(), line.getQuantity());
             }
+            returnSerialsToStock(lines);
         }
-        // REPAIR: no stock or financial effect.
+        // REPAIR: no stock or financial effect — and correspondingly no serial
+        // status change. The unit goes back to the same customer once repaired,
+        // so it stays ISSUED.
 
         rma.setStatus(RmaStatus.RESOLVED);
         rma.setResolutionType(request.getResolutionType());
@@ -200,6 +205,8 @@ public class RmaServiceImpl implements RmaService {
         if (rma.getStatus() != RmaStatus.REQUESTED && rma.getStatus() != RmaStatus.APPROVED) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only requested or approved RMAs can be cancelled");
         }
+        // Captured before the overwrite — this is the only record of how far the workflow got.
+        rma.setCancelledFromStatus(rma.getStatus());
         rma.setStatus(RmaStatus.CANCELLED);
         rmaRequestRepository.save(rma);
         return toResponse(rma);
@@ -214,6 +221,41 @@ public class RmaServiceImpl implements RmaService {
         }
         rmaLineRepository.deleteByRmaId(id);
         rmaRequestRepository.deleteById(id);
+    }
+
+    /**
+     * Brings serial-tracked units on these RMA lines back into stock, to match
+     * the {@code increaseStock} the caller just did.
+     *
+     * <p>Without this the quantity returned but the serial stayed {@code ISSUED}
+     * forever: {@code StockLevel} said the unit was on hand while every outbound
+     * path — delivery, transfer and adjustment all require {@code IN_STOCK} —
+     * refused to move it. The physical item sat on the shelf and could never be
+     * sold again.
+     *
+     * <p>Goes straight to {@code IN_STOCK} rather than {@code PENDING_QC}, even
+     * though re-inspecting returned goods would be the better business rule: the
+     * only transition out of {@code PENDING_QC} is the goods-receipt quality
+     * check (see {@code GoodsReceiptServiceImpl}), which is keyed on the
+     * originating receipt line and has long since completed for a unit that has
+     * already shipped. Parking returns there would strand them permanently.
+     * Re-inspection needs its own flow before this can route through it.
+     *
+     * <p>Only {@code ISSUED} units are touched, so resolving an RMA whose unit
+     * was meanwhile written off ({@code ADJUSTED_OUT}) doesn't silently revive it.
+     */
+    private void returnSerialsToStock(List<RmaLine> lines) {
+        for (RmaLine line : lines) {
+            if (line.getSerialNumberId() == null) {
+                continue;
+            }
+            serialNumberRepository.findById(line.getSerialNumberId()).ifPresent(serial -> {
+                if (serial.getStatus() == SerialNumberStatus.ISSUED) {
+                    serial.setStatus(SerialNumberStatus.IN_STOCK);
+                    serialNumberRepository.save(serial);
+                }
+            });
+        }
     }
 
     // Same unbinned-"pool"-row convention as SalesOrderServiceImpl's own
@@ -361,6 +403,7 @@ public class RmaServiceImpl implements RmaService {
                 .rmaNumber(rma.getRmaNumber())
                 .requestDate(rma.getRequestDate())
                 .status(rma.getStatus())
+                .cancelledFromStatus(rma.getCancelledFromStatus())
                 .resolutionType(rma.getResolutionType())
                 .reason(rma.getReason())
                 .notes(rma.getNotes())

@@ -25,6 +25,11 @@ public class StockTransferResponse {
     private LocalDate shipDate;
     private LocalDate receiveDate;
     private String status;
+
+    // Where the workflow actually got to, for documents that were
+    // cancelled or rejected. Null when unknown — including every row
+    // cancelled before this was recorded.
+    private String cancelledFromStatus;
     private String notes;
     private String requestedBy;
     private String approvedBy;

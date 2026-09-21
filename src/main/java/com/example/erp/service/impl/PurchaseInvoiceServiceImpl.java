@@ -263,6 +263,8 @@ public class PurchaseInvoiceServiceImpl implements PurchaseInvoiceService {
             autoPostingService.reverseAutoEntry("PURCHASE_INVOICE", invoice.getId(), actingUsername);
         }
 
+        // Captured before the overwrite — this is the only record of how far the workflow got.
+        invoice.setCancelledFromStatus(invoice.getStatus());
         invoice.setStatus(PurchaseInvoiceStatus.CANCELLED);
         purchaseInvoiceRepository.save(invoice);
         return toResponse(invoice, lines);
@@ -364,6 +366,7 @@ public class PurchaseInvoiceServiceImpl implements PurchaseInvoiceService {
                 .invoiceDate(invoice.getInvoiceDate())
                 .dueDate(invoice.getDueDate())
                 .status(invoice.getStatus().name())
+                .cancelledFromStatus(invoice.getCancelledFromStatus() == null ? null : invoice.getCancelledFromStatus().name())
                 .notes(invoice.getNotes())
                 .createdBy(invoice.getCreatedBy())
                 .subtotal(totals[0])

@@ -1,6 +1,7 @@
 package com.example.erp.dto;
 
 import com.example.erp.entity.LeadSource;
+import com.example.erp.entity.LeadStatus;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Max;
@@ -53,4 +54,11 @@ public class CreateLeadRequest {
 
     // Set for an upsell-style deal against an existing customer.
     private Long customerId;
+
+    // Which board column the lead starts in. Omitted for the plain "New lead"
+    // button, which means NEW; set when adding straight into a column.
+    // WON and LOST are refused — those are closed states reached by working a
+    // lead, and the entity blocks further edits once in them, so creating one
+    // there would produce a lead that can never be touched again.
+    private LeadStatus status;
 }

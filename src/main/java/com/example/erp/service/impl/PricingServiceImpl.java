@@ -68,8 +68,12 @@ public class PricingServiceImpl implements PricingService {
                 .discountPercent(priceGroup == null ? null : priceGroup.getDiscountPercent());
 
         if (priceGroup != null) {
+            // The base-unit row specifically. This lookup feeds POS and the
+            // price-check endpoint, neither of which sells in a non-base
+            // unit, and a plain (product, group) query would now match
+            // several rows once per-unit prices exist.
             ProductPrice override = productPriceRepository
-                    .findByProductIdAndPriceGroupId(productId, priceGroup.getId())
+                    .findByProductIdAndPriceGroupIdAndUnitOfMeasureIdIsNull(productId, priceGroup.getId())
                     .orElse(null);
             if (override != null) {
                 return response

@@ -86,6 +86,20 @@ public class Product {
     @Builder.Default
     private ProductTrackingType trackingType = ProductTrackingType.NONE;
 
+    // False for things that are sold or bought but never held: labour, delivery
+    // charges, consulting, subscriptions. A non-stockable product is skipped by
+    // every stock path — availability checks and reservations on sales order
+    // approval, and the stock decrement / movement on delivery — because it has
+    // no stock to check, reserve or move.
+    //
+    // Nullable (Boolean, not boolean) for the same ddl-auto=update reason as
+    // trackingType above: a NOT NULL column can't add itself to a table that
+    // already has rows. Treat a null read as true — every product that existed
+    // before this flag was a physical one.
+    @Column(name = "stockable")
+    @Builder.Default
+    private Boolean stockable = true;
+
     private String imageUrl;
 
     // Threshold for the Low Stock report (see InventoryReportServiceImpl) —
@@ -108,4 +122,13 @@ public class Product {
     // warrantyMonths vs today).
     @Column(name = "warranty_months")
     private Integer warrantyMonths;
+
+    /**
+     * Null-safe read of {@link #stockable}. Rows written before the flag existed
+     * were all physical products, so a null means stockable. Every stock path
+     * should go through this rather than the raw getter.
+     */
+    public boolean isStockable() {
+        return stockable == null || stockable;
+    }
 }

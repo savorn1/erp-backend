@@ -290,7 +290,9 @@ public class DeliveryServiceImpl implements DeliveryService {
             // converted before comparing — a 2 BOX line needs 24 PCS on hand, not 2.
             BigDecimal baseQuantityDelivered = baseQuantity(line);
             BigDecimal available = availableQuantity(line.getProductId(), so.getWarehouseId(), line.getBinId());
-            if (baseQuantityDelivered.compareTo(available) > 0 && !settings.isAllowNegativeStock()) {
+            // A service has no stock to be short of.
+            boolean stockable = product == null || product.isStockable();
+            if (stockable && baseQuantityDelivered.compareTo(available) > 0 && !settings.isAllowNegativeStock()) {
                 throw new AppException(HttpStatus.BAD_REQUEST,
                         "Insufficient stock on hand (" + available + ") for " + productLabel);
             }
@@ -334,6 +336,15 @@ public class DeliveryServiceImpl implements DeliveryService {
             SalesOrderLine soLine = soLines.get(line.getSalesOrderLineId());
             soLine.setQuantityDelivered(soLine.getQuantityDelivered().add(line.getQuantityDelivered()));
             salesOrderLineRepository.save(soLine);
+
+            // Nothing below applies to a non-stockable line: there is no stock to
+            // decrement, no reservation to release, and a stock movement for a
+            // service would be a phantom entry in the inventory ledger. The SO
+            // line's quantityDelivered above is still credited, so the order
+            // still completes.
+            if (!isStockableLine(line)) {
+                continue;
+            }
 
             // Everything below moves inventory, so all of it works in base units —
             // only the SO line's own quantityDelivered above stays in the line's unit.
@@ -392,6 +403,8 @@ public class DeliveryServiceImpl implements DeliveryService {
         if (!delivery.getStatus().canTransitionTo(DeliveryStatus.CANCELLED)) {
             throw new AppException(HttpStatus.BAD_REQUEST, "Only pending, picked, or packed deliveries can be cancelled");
         }
+        // Captured before the overwrite — this is the only record of how far the workflow got.
+        delivery.setCancelledFromStatus(delivery.getStatus());
         delivery.setStatus(DeliveryStatus.CANCELLED);
         deliveryRepository.save(delivery);
         return getDelivery(id);
@@ -425,6 +438,10 @@ public class DeliveryServiceImpl implements DeliveryService {
     private BigDecimal baseQuantity(DeliveryLine line) {
         BigDecimal factor = line.getConversionFactor() != null ? line.getConversionFactor() : BigDecimal.ONE;
         return line.getQuantityDelivered().multiply(factor);
+    }
+
+    private boolean isStockableLine(DeliveryLine line) {
+        return productRepository.findById(line.getProductId()).map(Product::isStockable).orElse(true);
     }
 
     private BigDecimal availableQuantity(Long productId, Long warehouseId, Long binId) {
@@ -564,6 +581,7 @@ public class DeliveryServiceImpl implements DeliveryService {
                 .deliveryNumber(delivery.getDeliveryNumber())
                 .deliveryDate(delivery.getDeliveryDate())
                 .status((delivery.getStatus() == null ? DeliveryStatus.DELIVERED : delivery.getStatus()).name())
+                .cancelledFromStatus(delivery.getCancelledFromStatus() == null ? null : delivery.getCancelledFromStatus().name())
                 .notes(delivery.getNotes())
                 .createdBy(delivery.getCreatedBy())
                 .pickedBy(delivery.getPickedBy())

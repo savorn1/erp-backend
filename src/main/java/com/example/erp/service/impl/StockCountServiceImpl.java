@@ -14,20 +14,24 @@ import com.example.erp.dto.SubmitStockCountRequest;
 import com.example.erp.entity.Company;
 import com.example.erp.entity.Product;
 import com.example.erp.entity.ProductTrackingType;
+import com.example.erp.entity.ProductUom;
 import com.example.erp.entity.StockAdjustmentReason;
 import com.example.erp.entity.StockCount;
 import com.example.erp.entity.StockCountLine;
 import com.example.erp.entity.StockCountStatus;
 import com.example.erp.entity.StockLevel;
+import com.example.erp.entity.UnitOfMeasure;
 import com.example.erp.entity.Warehouse;
 import com.example.erp.entity.WarehouseBin;
 import com.example.erp.entity.WarehouseZone;
 import com.example.erp.exception.AppException;
 import com.example.erp.repository.CompanyRepository;
 import com.example.erp.repository.ProductRepository;
+import com.example.erp.repository.ProductUomRepository;
 import com.example.erp.repository.StockCountLineRepository;
 import com.example.erp.repository.StockCountRepository;
 import com.example.erp.repository.StockLevelRepository;
+import com.example.erp.repository.UnitOfMeasureRepository;
 import com.example.erp.repository.WarehouseBinRepository;
 import com.example.erp.repository.WarehouseRepository;
 import com.example.erp.repository.WarehouseZoneRepository;
@@ -43,12 +47,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -61,6 +67,8 @@ public class StockCountServiceImpl implements StockCountService {
     private final WarehouseZoneRepository warehouseZoneRepository;
     private final WarehouseBinRepository warehouseBinRepository;
     private final ProductRepository productRepository;
+    private final ProductUomRepository productUomRepository;
+    private final UnitOfMeasureRepository unitOfMeasureRepository;
     private final StockLevelRepository stockLevelRepository;
     private final StockAdjustmentService stockAdjustmentService;
 
@@ -106,12 +114,14 @@ public class StockCountServiceImpl implements StockCountService {
         requireCompany(request.getCompanyId());
         requireWarehouse(request.getWarehouseId(), request.getCompanyId());
 
+        Map<Long, UnitSelection> unitsByLine = new HashMap<>();
         for (StockCountLineRequest lineRequest : request.getLines()) {
             Product product = productRepository.findById(lineRequest.getProductId())
                     .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Product not found with id: " + lineRequest.getProductId()));
             if (!product.getCompanyId().equals(request.getCompanyId())) {
                 throw new AppException(HttpStatus.BAD_REQUEST, "Product does not belong to the selected company: " + product.getName());
             }
+            unitsByLine.put(lineRequest.getProductId(), resolveLineUnit(product, lineRequest.getUnitOfMeasureId()));
             ProductTrackingType trackingType = product.getTrackingType() == null ? ProductTrackingType.NONE : product.getTrackingType();
             if (trackingType != ProductTrackingType.NONE) {
                 throw new AppException(HttpStatus.BAD_REQUEST,
@@ -134,12 +144,17 @@ public class StockCountServiceImpl implements StockCountService {
         stockCountRepository.save(count);
 
         List<StockCountLine> lines = request.getLines().stream()
-                .map(r -> StockCountLine.builder()
-                        .stockCountId(count.getId())
-                        .productId(r.getProductId())
-                        .binId(r.getBinId())
-                        .systemQuantity(availableQuantity(r.getProductId(), request.getWarehouseId(), r.getBinId()))
-                        .build())
+                .map(r -> {
+                    UnitSelection unit = unitsByLine.get(r.getProductId());
+                    return StockCountLine.builder()
+                            .stockCountId(count.getId())
+                            .productId(r.getProductId())
+                            .binId(r.getBinId())
+                            .unitOfMeasureId(unit.unitOfMeasureId())
+                            .conversionFactor(unit.conversionFactor())
+                            .systemQuantity(availableQuantity(r.getProductId(), request.getWarehouseId(), r.getBinId()))
+                            .build();
+                })
                 .toList();
         lines = stockCountLineRepository.saveAll(lines);
 
@@ -161,8 +176,12 @@ public class StockCountServiceImpl implements StockCountService {
             if (line == null) {
                 throw new AppException(HttpStatus.BAD_REQUEST, "Line not found on this count: " + lineRequest.getLineId());
             }
-            line.setCountedQuantity(lineRequest.getCountedQuantity());
-            line.setVarianceQuantity(lineRequest.getCountedQuantity().subtract(line.getSystemQuantity()));
+            // The submitted figure is in the line's unit ("3 cases"); everything
+            // stored is in base units, so convert on the way in. Multiplication
+            // only — exact, unlike converting systemQuantity the other way.
+            BigDecimal countedInBaseUnits = lineRequest.getCountedQuantity().multiply(conversionFactor(line));
+            line.setCountedQuantity(countedInBaseUnits);
+            line.setVarianceQuantity(countedInBaseUnits.subtract(line.getSystemQuantity()));
             stockCountLineRepository.save(line);
         }
 
@@ -251,6 +270,47 @@ public class StockCountServiceImpl implements StockCountService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    // The product's own base unit always works, factor 1 — no ProductUom row
+    // is required for it. Any other unit must already be registered as an
+    // inventory-allowed ProductUom for this product. Mirrors
+    // StockTransferServiceImpl.resolveLineUnit: both are internal stock
+    // documents, so both gate on allowInventory rather than purchase/sale.
+    private record UnitSelection(Long unitOfMeasureId, BigDecimal conversionFactor) {}
+
+    private UnitSelection resolveLineUnit(Product product, Long requestedUnitOfMeasureId) {
+        Long unitId = requestedUnitOfMeasureId != null ? requestedUnitOfMeasureId : product.getUnitOfMeasureId();
+        if (unitId.equals(product.getUnitOfMeasureId())) {
+            return new UnitSelection(unitId, BigDecimal.ONE);
+        }
+        ProductUom productUom = productUomRepository.findByProductIdAndVariantIdIsNullAndUnitOfMeasureId(product.getId(), unitId)
+                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST,
+                        "This unit is not configured for " + product.getName() + " — add it under the product's UOMs first"));
+        if (!productUom.isAllowInventory()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "This unit is not allowed for stock counts of " + product.getName());
+        }
+        return new UnitSelection(unitId, productUom.getConversionFactor());
+    }
+
+    // Null on rows written before stock counts had units — those were always
+    // entered in base units, so one-for-one is the right reading.
+    private static BigDecimal conversionFactor(StockCountLine line) {
+        return line.getConversionFactor() != null ? line.getConversionFactor() : BigDecimal.ONE;
+    }
+
+    // Base units -> the line's unit, for display on the count sheet. Never
+    // fed back into a stored quantity: 37 bottles at 12 to the case is
+    // 3.0833 cases, and only the base figure stays exact.
+    private static BigDecimal inLineUnit(StockCountLine line, BigDecimal baseQuantity) {
+        if (baseQuantity == null) {
+            return null;
+        }
+        BigDecimal factor = conversionFactor(line);
+        if (factor.compareTo(BigDecimal.ZERO) == 0) {
+            return baseQuantity;
+        }
+        return baseQuantity.divide(factor, 4, RoundingMode.HALF_UP);
+    }
+
     private void requireBinInWarehouse(Long binId, Long warehouseId) {
         WarehouseBin bin = warehouseBinRepository.findById(binId)
                 .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Bin not found with id: " + binId));
@@ -292,11 +352,22 @@ public class StockCountServiceImpl implements StockCountService {
         Map<Long, WarehouseBin> bins = lines.isEmpty() ? Map.of() : warehouseBinRepository.findAllById(
                 lines.stream().map(StockCountLine::getBinId).filter(Objects::nonNull).distinct().toList()
         ).stream().collect(Collectors.toMap(WarehouseBin::getId, b -> b));
+        // Both the line's own unit and each product's base unit — the count
+        // sheet shows quantities in the first and the variance in the second.
+        List<Long> unitIds = Stream.concat(
+                lines.stream().map(StockCountLine::getUnitOfMeasureId),
+                products.values().stream().map(Product::getUnitOfMeasureId)
+        ).filter(Objects::nonNull).distinct().toList();
+        Map<Long, UnitOfMeasure> units = unitIds.isEmpty() ? Map.of() : unitOfMeasureRepository.findAllById(unitIds)
+                .stream().collect(Collectors.toMap(UnitOfMeasure::getId, u -> u));
 
         List<StockCountLineResponse> lineResponses = lines.stream()
                 .map(line -> {
                     Product product = products.get(line.getProductId());
                     WarehouseBin bin = line.getBinId() == null ? null : bins.get(line.getBinId());
+                    UnitOfMeasure unit = line.getUnitOfMeasureId() == null ? null : units.get(line.getUnitOfMeasureId());
+                    UnitOfMeasure baseUnit = product == null || product.getUnitOfMeasureId() == null
+                            ? null : units.get(product.getUnitOfMeasureId());
                     return StockCountLineResponse.builder()
                             .id(line.getId())
                             .productId(line.getProductId())
@@ -304,9 +375,15 @@ public class StockCountServiceImpl implements StockCountService {
                             .productSku(product == null ? null : product.getSku())
                             .binId(line.getBinId())
                             .binName(bin == null ? null : bin.getName())
+                            .unitOfMeasureId(line.getUnitOfMeasureId())
+                            .unitOfMeasureAbbreviation(unit == null ? null : unit.getAbbreviation())
+                            .conversionFactor(conversionFactor(line))
+                            .baseUnitOfMeasureAbbreviation(baseUnit == null ? null : baseUnit.getAbbreviation())
                             .systemQuantity(line.getSystemQuantity())
                             .countedQuantity(line.getCountedQuantity())
                             .varianceQuantity(line.getVarianceQuantity())
+                            .systemQuantityInUnit(inLineUnit(line, line.getSystemQuantity()))
+                            .countedQuantityInUnit(inLineUnit(line, line.getCountedQuantity()))
                             .build();
                 })
                 .toList();

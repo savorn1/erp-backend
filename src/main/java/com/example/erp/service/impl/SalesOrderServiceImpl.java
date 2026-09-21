@@ -316,7 +316,18 @@ public class SalesOrderServiceImpl implements SalesOrderService {
 
         InventorySettings settings = inventorySettingsService.resolveForCompany(so.getCompanyId());
 
+        Map<Long, Product> lineProducts = productRepository.findAllById(
+                lines.stream().map(SalesOrderLine::getProductId).distinct().toList()
+        ).stream().collect(Collectors.toMap(Product::getId, p -> p));
+
         for (SalesOrderLine line : lines) {
+            // Services and other non-stockable lines have no stock to check or
+            // reserve — running them through the availability check would fail
+            // every order on "Insufficient available stock (available 0)".
+            Product product = lineProducts.get(line.getProductId());
+            if (product != null && !product.isStockable()) {
+                continue;
+            }
             BigDecimal remaining = line.getQuantityOrdered().subtract(line.getQuantityDelivered());
             BigDecimal backordered = stockAvailabilityService.check(so.getCompanyId(), line.getProductId(), so.getWarehouseId(), remaining, actingUsername);
             if (backordered.signum() > 0) {
@@ -374,6 +385,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 }
             }
         }
+        // Captured before the overwrite — this is the only record of how far the workflow got.
+        so.setCancelledFromStatus(so.getStatus());
         so.setStatus(SalesOrderStatus.CANCELLED);
         salesOrderRepository.save(so);
         approvalWorkflowService.clearApprovals("SALES_ORDER", id);
@@ -495,10 +508,12 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         List<SalesOrderLine> lines = requests.stream()
                 .map(r -> {
                     Product product = products.get(r.getProductId());
-                    BigDecimal unitPrice = r.getUnitPrice() != null ? r.getUnitPrice() : resolveUnitPrice(r.getProductId(), priceGroupId, product);
+                    UnitSelection unit = resolveLineUnit(product, r.getUnitOfMeasureId());
+                    BigDecimal unitPrice = r.getUnitPrice() != null
+                            ? r.getUnitPrice()
+                            : resolveUnitPrice(r.getProductId(), priceGroupId, product, unit);
                     BigDecimal taxRate = r.getTaxRate() != null ? r.getTaxRate()
                             : (product == null ? BigDecimal.ZERO : product.getTaxRate());
-                    UnitSelection unit = resolveLineUnit(product, r.getUnitOfMeasureId());
                     return SalesOrderLine.builder()
                             .salesOrderId(salesOrderId)
                             .productId(r.getProductId())
@@ -545,15 +560,62 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return line.getConversionFactor() != null ? line.getConversionFactor() : BigDecimal.ONE;
     }
 
+    /**
+     * Scales a base-unit price to the line's unit.
+     *
+     * <p>Everything {@link #resolveUnitPrice} can return — the product's
+     * sellingPrice, a ProductPrice override, a price-group discount — is per
+     * one <em>base</em> unit, while {@code quantityOrdered} and therefore
+     * {@code quantityOrdered * unitPrice} are in the line's unit. Without this
+     * a case of twelve bottles was ordered, shipped as twelve (the stock path
+     * does apply the factor) and billed as one.
+     *
+     * <p>A price supplied on the request is left alone: whoever typed it was
+     * looking at the line's unit, so it is already in the right terms.
+     *
+     * <p>Scale 4 matches the column and keeps sub-cent base prices — a price
+     * per gram against a kilogram factor — from rounding away to zero.
+     */
+    private static BigDecimal priceInLineUnit(BigDecimal basePrice, BigDecimal conversionFactor) {
+        BigDecimal factor = conversionFactor == null ? BigDecimal.ONE : conversionFactor;
+        return basePrice.multiply(factor).setScale(4, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * The price for one of the line's units.
+     *
+     * <p>A ProductPrice recorded against that exact unit wins and is used
+     * as-is — that is the whole point of per-unit pricing, where a case can
+     * cost less than twelve bottles, so scaling it would undo the discount
+     * someone deliberately entered.
+     *
+     * <p>Everything else in the cascade is a base-unit figure and gets
+     * multiplied by the conversion factor.
+     */
+    private BigDecimal resolveUnitPrice(Long productId, Long priceGroupId, Product product, UnitSelection unit) {
+        boolean nonBaseUnit = product != null
+                && unit.unitOfMeasureId() != null
+                && !unit.unitOfMeasureId().equals(product.getUnitOfMeasureId());
+        if (priceGroupId != null && nonBaseUnit) {
+            var perUnit = productPriceRepository
+                    .findByProductIdAndPriceGroupIdAndUnitOfMeasureId(productId, priceGroupId, unit.unitOfMeasureId());
+            if (perUnit.isPresent()) {
+                return perUnit.get().getPrice();
+            }
+        }
+        return priceInLineUnit(resolveBaseUnitPrice(productId, priceGroupId, product), unit.conversionFactor());
+    }
+
     // Cascade: explicit per-product ProductPrice override wins; otherwise, if
     // the price group defines a default discountPercent, apply it off the
     // product's sellingPrice; otherwise fall back to the plain sellingPrice.
-    private BigDecimal resolveUnitPrice(Long productId, Long priceGroupId, Product product) {
+    // Always per one base unit — the caller scales.
+    private BigDecimal resolveBaseUnitPrice(Long productId, Long priceGroupId, Product product) {
         BigDecimal sellingPrice = product == null ? BigDecimal.ZERO : product.getSellingPrice();
         if (priceGroupId == null) {
             return sellingPrice;
         }
-        var override = productPriceRepository.findByProductIdAndPriceGroupId(productId, priceGroupId);
+        var override = productPriceRepository.findByProductIdAndPriceGroupIdAndUnitOfMeasureIdIsNull(productId, priceGroupId);
         if (override.isPresent()) {
             return override.get().getPrice();
         }
@@ -752,6 +814,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .orderDate(so.getOrderDate())
                 .expectedDate(so.getExpectedDate())
                 .status(so.getStatus().name())
+                .cancelledFromStatus(so.getCancelledFromStatus() == null ? null : so.getCancelledFromStatus().name())
                 .notes(so.getNotes())
                 .createdBy(so.getCreatedBy())
                 .salesRepUserId(so.getSalesRepUserId())

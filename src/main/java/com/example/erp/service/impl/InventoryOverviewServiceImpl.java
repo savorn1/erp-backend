@@ -14,6 +14,7 @@ import com.example.erp.entity.StockLevel;
 import com.example.erp.entity.StockTransfer;
 import com.example.erp.entity.StockTransferLine;
 import com.example.erp.entity.StockTransferStatus;
+import com.example.erp.entity.UnitOfMeasure;
 import com.example.erp.entity.Warehouse;
 import com.example.erp.repository.ProductRepository;
 import com.example.erp.repository.PurchaseOrderLineRepository;
@@ -23,6 +24,7 @@ import com.example.erp.repository.SalesOrderRepository;
 import com.example.erp.repository.StockLevelRepository;
 import com.example.erp.repository.StockTransferLineRepository;
 import com.example.erp.repository.StockTransferRepository;
+import com.example.erp.repository.UnitOfMeasureRepository;
 import com.example.erp.repository.WarehouseRepository;
 import com.example.erp.service.InventoryOverviewService;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +41,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -56,6 +59,7 @@ public class InventoryOverviewServiceImpl implements InventoryOverviewService {
     private final StockLevelRepository stockLevelRepository;
     private final ProductRepository productRepository;
     private final WarehouseRepository warehouseRepository;
+    private final UnitOfMeasureRepository unitOfMeasureRepository;
     private final SalesOrderRepository salesOrderRepository;
     private final SalesOrderLineRepository salesOrderLineRepository;
     private final PurchaseOrderRepository purchaseOrderRepository;
@@ -133,6 +137,11 @@ public class InventoryOverviewServiceImpl implements InventoryOverviewService {
         Map<Long, Warehouse> warehousesById = warehouseRepository.findAllById(
                 allKeys.stream().map(Key::warehouseId).distinct().toList()
         ).stream().collect(Collectors.toMap(Warehouse::getId, w -> w));
+        // Batched off the products already loaded — one query for the page
+        // rather than one per row.
+        Map<Long, String> unitAbbreviations = unitOfMeasureRepository.findAllById(
+                productsById.values().stream().map(Product::getUnitOfMeasureId).filter(Objects::nonNull).distinct().toList()
+        ).stream().collect(Collectors.toMap(UnitOfMeasure::getId, UnitOfMeasure::getAbbreviation));
 
         String search = filter.getSearch() == null ? null : filter.getSearch().toLowerCase();
         List<InventoryOverviewResponse> rows = new ArrayList<>();
@@ -159,6 +168,7 @@ public class InventoryOverviewServiceImpl implements InventoryOverviewService {
                     .productSku(product.getSku())
                     .warehouseId(warehouse.getId())
                     .warehouseName(warehouse.getName())
+                    .unitOfMeasureAbbreviation(unitAbbreviations.get(product.getUnitOfMeasureId()))
                     .currentStock(current)
                     .reservedStock(reserved)
                     .availableStock(current.subtract(reserved))

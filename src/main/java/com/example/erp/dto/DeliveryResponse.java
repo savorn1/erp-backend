@@ -24,6 +24,11 @@ public class DeliveryResponse {
     private String deliveryNumber;
     private LocalDate deliveryDate;
     private String status;
+
+    // Where the workflow actually got to, for documents that were
+    // cancelled or rejected. Null when unknown — including every row
+    // cancelled before this was recorded.
+    private String cancelledFromStatus;
     private String notes;
     private String createdBy;
     private String pickedBy;

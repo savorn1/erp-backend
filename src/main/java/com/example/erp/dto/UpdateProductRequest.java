@@ -50,6 +50,9 @@ public class UpdateProductRequest {
 
     private ProductTrackingType trackingType;
 
+    // Null leaves the existing value alone, as with the other optional fields here.
+    private Boolean stockable;
+
     private String imageUrl;
 
     // Optional — leave unset (or zero) to never flag this product on the Low

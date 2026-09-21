@@ -43,6 +43,8 @@ public class ProductResponse {
     private BigDecimal taxRate;
     private String status;
     private String trackingType;
+    // Always populated; a legacy null on the row reads back as true.
+    private boolean stockable;
     private String imageUrl;
     // Null/zero means no threshold configured — never flagged by the Low
     // Stock report.

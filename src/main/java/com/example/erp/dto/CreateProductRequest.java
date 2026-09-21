@@ -48,6 +48,9 @@ public class CreateProductRequest {
 
     private ProductTrackingType trackingType = ProductTrackingType.NONE;
 
+    // False for services and other non-inventory items — see Product.stockable.
+    private Boolean stockable = Boolean.TRUE;
+
     private String imageUrl;
 
     // Optional — leave unset (or zero) to never flag this product on the Low

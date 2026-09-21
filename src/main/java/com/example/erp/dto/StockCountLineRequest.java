@@ -10,4 +10,8 @@ public class StockCountLineRequest {
     private Long productId;
 
     private Long binId;
+
+    // The unit the counter will enter quantities in. Null means the product's
+    // own base unit; anything else must be an inventory-allowed ProductUom.
+    private Long unitOfMeasureId;
 }

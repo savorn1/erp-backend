@@ -195,6 +195,7 @@ public class ProductServiceImpl implements ProductService {
                 .sellingPrice(request.getSellingPrice())
                 .taxRate(request.getTaxRate())
                 .trackingType(request.getTrackingType())
+                .stockable(request.getStockable() == null || request.getStockable())
                 .imageUrl(request.getImageUrl())
                 .reorderPoint(request.getReorderPoint())
                 .maxStock(request.getMaxStock())
@@ -290,6 +291,7 @@ public class ProductServiceImpl implements ProductService {
         product.setSellingPrice(request.getSellingPrice());
         product.setTaxRate(request.getTaxRate());
         product.setTrackingType(request.getTrackingType());
+        if (request.getStockable() != null) product.setStockable(request.getStockable());
         product.setImageUrl(request.getImageUrl());
         product.setReorderPoint(request.getReorderPoint());
         product.setMaxStock(request.getMaxStock());
@@ -414,6 +416,7 @@ public class ProductServiceImpl implements ProductService {
                 // Existing rows created before this field was added read back
                 // as null — treat that the same as NONE rather than crashing.
                 .trackingType((product.getTrackingType() == null ? ProductTrackingType.NONE : product.getTrackingType()).name())
+                .stockable(product.isStockable())
                 .imageUrl(product.getImageUrl())
                 .reorderPoint(product.getReorderPoint() == null ? BigDecimal.ZERO : product.getReorderPoint())
                 .maxStock(product.getMaxStock() == null ? BigDecimal.ZERO : product.getMaxStock())
